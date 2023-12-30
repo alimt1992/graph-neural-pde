@@ -32,15 +32,15 @@ class ODEFuncAtt(ODEFunc):
   def multiply_attention(self, x, attention, wx):
     if self.opt['mix_features']:
       wx = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, idx], wx.shape[0], wx.shape[0], wx) for idx in
-         range(self.opt['heads'])], dim=0),
-        dim=0)
+        [torch_sparse.spmm(self.edge_index, attention[:, idx], wx.shape[1], wx.shape[1], wx) for idx in
+         range(self.opt['heads'])], dim=1),
+        dim=1)
       ax = torch.mm(wx, self.multihead_att_layer.Wout)
     else:
       ax = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, idx], x.shape[0], x.shape[0], x) for idx in
-         range(self.opt['heads'])], dim=0),
-        dim=0)
+        [torch_sparse.spmm(self.edge_index, attention[:, idx], x.shape[1], x.shape[1], x) for idx in
+         range(self.opt['heads'])], dim=1),
+        dim=1)
     return ax
 
   def forward(self, t, x):  # t is needed when called by the integrator
@@ -97,20 +97,23 @@ class SpGraphAttentionLayer(nn.Module):
     self.Wout = nn.Parameter(torch.zeros(size=(self.attention_dim, self.in_features))).to(device)
     nn.init.xavier_normal_(self.Wout.data, gain=1.414)
 
-    self.a = nn.Parameter(torch.zeros(size=(2 * self.d_k, 1, 1))).to(device)
+    self.a = nn.Parameter(torch.zeros(size=(1, 2 * self.d_k, 1, 1))).to(device)
     nn.init.xavier_normal_(self.a.data, gain=1.414)
 
     self.leakyrelu = nn.LeakyReLU(self.alpha)
 
   def forward(self, x, edge):
     wx = torch.mm(x, self.W)  # h: N x out
-    h = wx.view(-1, self.h, self.d_k)
-    h = h.transpose(1, 2)
+    h = wx.view(self.opt['batch_size'], -1, self.h, self.d_k)
+    h = h.transpose(2, 3)
 
     # Self-attention on the nodes - Shared attention mechanism
-    edge_h = torch.cat((h[edge[0, :], :, :], h[edge[1, :], :, :]), dim=1).transpose(0, 1).to(
+    index0 = torch.arange(h.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+    index2 = torch.arange(h.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
+    index3 = torch.arange(h.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+    edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3], h[:, edge[:, 1, :], index2, index3]), dim=1).transpose(1, 2).to(
       self.device)  # edge: 2*D x E
-    edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=0)).to(self.device)
+    edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
     attention = softmax(edge_e, edge[self.opt['attention_norm_idx']])
     return attention, wx
 

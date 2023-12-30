@@ -43,6 +43,7 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
     self.best_test = 0
     self.max_test_steps = opt['max_test_steps']
     self.best_time = 0
+    self.batch_size = opt['batch_size']
     self.ode_test = self.test_OGB if opt['dataset'] == 'ogbn-arxiv' else self.test
     self.dataset = opt['dataset']
     if opt['dataset'] == 'ogbn-arxiv':
@@ -56,13 +57,13 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
     self.best_time = time.item()
 
   def integrate(self, t):
-    solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
+    solution = torch.empty(t.shape, *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
     solution[0] = self.y0
     t = t.to(self.dtype)
     self._before_integrate(t)
     new_t = t
-    for i in range(1, len(t)):
-      new_t, y = self.advance(t[i])
+    for i in range(1, len(t[0])):
+      new_t, y = self.advance(t[:,i])
       solution[i] = y
     return new_t, solution
 
@@ -304,5 +305,5 @@ class EarlyStopInt(torch.nn.Module):
     self.solver.m2_bias = self.m2_bias
     t, solution = self.solver.integrate(t)
     if shapes is not None:
-      solution = _flat_to_shape(solution, (len(t),), shapes)
+      solution = _flat_to_shape(solution, t.shape, shapes)
     return solution

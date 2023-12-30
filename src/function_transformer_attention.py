@@ -100,6 +100,22 @@ class SpGraphTransAttentionLayer(nn.Module):
       self.Kp = nn.Linear(opt['pos_enc_hidden_dim'], self.attention_dim)
       self.init_weights(self.Kp)
 
+      #if there is other modality
+      if self.opt['multi_modal']:
+        self.Q2 = nn.Linear(opt['hidden_dim']-opt['pos_enc_hidden_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.init_weights(self.Q2)
+        self.V2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.init_weights(self.V2)
+        self.K2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.init_weights(self.K2)
+
+        self.Q2p = nn.Linear(opt['pos_enc_hidden_dim'], opt['pos_enc_hidden_dim'])
+        self.init_weights(self.Q2p)
+        self.V2p = nn.Linear(opt['second_modality_dim'], opt['pos_enc_hidden_dim'])
+        self.init_weights(self.V2p)
+        self.K2p = nn.Linear(opt['second_modality_dim'], opt['pos_enc_hidden_dim'])
+        self.init_weights(self.K2p)
+
     else:
       if self.opt['attention_type'] == "exp_kernel":
         self.output_var = nn.Parameter(torch.ones(1))
@@ -114,6 +130,15 @@ class SpGraphTransAttentionLayer(nn.Module):
       self.K = nn.Linear(in_features, self.attention_dim)
       self.init_weights(self.K)
 
+      #if there is other modality
+      if self.opt['multi_modal']:
+        self.Q2 = nn.Linear(in_features, in_features)
+        self.init_weights(self.Q2)
+        self.V2 = nn.Linear(opt['second_modality_dim'], in_features)
+        self.init_weights(self.V2)
+        self.K2 = nn.Linear(opt['second_modality_dim'], in_features)
+        self.init_weights(self.K2)
+    
     self.activation = nn.Sigmoid()  # nn.LeakyReLU(self.alpha)
 
     self.Wout = nn.Linear(self.d_k, in_features)
@@ -125,7 +150,7 @@ class SpGraphTransAttentionLayer(nn.Module):
       # m.bias.data.fill_(0.01)
       nn.init.constant_(m.weight, 1e-5)
 
-  def forward(self, x, edge):
+  def forward(self, x, edge, y=None):
     """
     x might be [features, augmentation, positional encoding, labels]
     """
@@ -135,6 +160,10 @@ class SpGraphTransAttentionLayer(nn.Module):
       p = x[:, self.opt['feat_hidden_dim']: label_index]
       x = torch.cat((x[:, :self.opt['feat_hidden_dim']], x[:, label_index:]), dim=1)
 
+      if self.opt['multi_modal']:
+        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+        p = torch.mm(torch.nn.softmax(torch.mm(self.Q2p(p), self.K2p(y).t)), self.V2p(y))
+      
       qx = self.Qx(x)
       kx = self.Kx(x)
       vx = self.Vx(x)
@@ -171,6 +200,10 @@ class SpGraphTransAttentionLayer(nn.Module):
       v = None
 
     else:
+
+      if self.opt['multi_modal']:
+        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+      
       q = self.Q(x)
       k = self.K(x)
       v = self.V(x)

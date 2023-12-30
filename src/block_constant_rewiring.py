@@ -42,11 +42,11 @@ class ConstantODEblock(ODEblock):
     M = int(self.num_nodes * (1/(1 - (1 - self.opt['att_samp_pct'])) - 1))
 
     with torch.no_grad():
-      new_edges = np.random.choice(self.num_nodes, size=(2,M), replace=True, p=None)
+      new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
-      cat = torch.cat([self.data_edge_index, new_edges],dim=1)
-      no_repeats = torch.unique(cat, sorted=False, return_inverse=False,
-                                return_counts=False, dim=0)
+      cat = torch.cat([self.data_edge_index, new_edges],dim=2)
+      no_repeats = self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
+                                                  return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
       self.data_edge_index = no_repeats
 
   def add_khop_edges(self, k):
@@ -57,9 +57,9 @@ class ConstantODEblock(ODEblock):
         torch_sparse.spspmm(self.odefunc.edge_index, self.odefunc.edge_weight,
                             self.odefunc.edge_index, self.odefunc.edge_weight, n, n, n, coalesced=False)
     self.edge_weight = 0.5 * self.edge_weight + 0.5 * new_weights
-    cat = torch.cat([self.data_edge_index, new_edges], dim=1)
-    self.edge_index = torch.unique(cat, sorted=False, return_inverse=False,
-                                   return_counts=False, dim=0)
+    cat = torch.cat([self.data_edge_index, new_edges], dim=2)
+    self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
+                                   return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
     # threshold
     # normalise
 
@@ -85,21 +85,21 @@ class ConstantODEblock(ODEblock):
     # create attention mask
     if self.training:
       with torch.no_grad():
-        mean_att = attention_weights.mean(dim=1, keepdim=False)
+        mean_att = attention_weights.mean(dim=2, keepdim=False)
         if self.opt['use_flux']:
-          src_features = x[self.data_edge_index[0, :], :]
-          dst_features = x[self.data_edge_index[1, :], :]
-          delta = torch.linalg.norm(src_features-dst_features, dim=1)
+          src_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 0, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
+          dst_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 1, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
+          delta = torch.linalg.norm(src_features - dst_features, dim=2)
           mean_att = mean_att * delta
         threshold = torch.quantile(mean_att, 1-self.opt['att_samp_pct'])
         mask = mean_att > threshold
-        self.odefunc.edge_index = self.data_edge_index[:, mask.T]
+        self.odefunc.edge_index = self.data_edge_index[:, :, mask.T]
         sampled_attention_weights = self.renormalise_attention(mean_att[mask])
-        print('retaining {} of {} edges'.format(self.odefunc.edge_index.shape[1], self.data_edge_index.shape[1]))
+        print('retaining {} of {} edges'.format(self.odefunc.edge_index.shape[2], self.data_edge_index.shape[2]))
         self.odefunc.attention_weights = sampled_attention_weights
     else:
       self.odefunc.edge_index = self.data_edge_index
-      self.odefunc.attention_weights = attention_weights.mean(dim=1, keepdim=False)
+      self.odefunc.attention_weights = attention_weights.mean(dim=2, keepdim=False)
     self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
     self.reg_odefunc.odefunc.attention_weights = self.odefunc.attention_weights
 
@@ -108,7 +108,7 @@ class ConstantODEblock(ODEblock):
 
     integrator = self.train_integrator if self.training else self.test_integrator
     
-    reg_states = tuple( torch.zeros(x.size(0)).to(x) for i in range(self.nreg) )
+    reg_states = tuple( torch.zeros(x.size(0), x.size(1)).to(x) for i in range(self.nreg) )
 
     func = self.reg_odefunc if self.training and self.nreg > 0 else self.odefunc
     state = (x,) + reg_states if self.training and self.nreg > 0 else x
