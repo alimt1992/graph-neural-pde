@@ -60,7 +60,8 @@ class RewireAttODEblock(ODEblock):
       #todo check if should be using coalesce insted of unique
       #eg https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/transforms/two_hop.html#TwoHop
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
-      no_repeats = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=2)
+      no_repeats = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
+                                return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
       self.data_edge_index = no_repeats
       self.odefunc.edge_index = self.data_edge_index
 

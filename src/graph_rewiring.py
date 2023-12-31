@@ -206,7 +206,7 @@ def add_edges(model, opt):
   if opt['edge_sampling_add_type'] == 'random':
     new_edges = np.random.choice(num_nodes, size=(opt['batch_size'], 2, M), replace=True, p=None)
     new_edges = torch.tensor(new_edges, device=model.device)
-    new_edges2 = new_edges[[1, 0], :]
+    new_edges2 = new_edges[:,[1, 0], :]
     cat = torch.cat([model.odeblock.odefunc.edge_index, new_edges, new_edges2], dim=2)
   elif opt['edge_sampling_add_type'] == 'anchored':
     pass
@@ -220,7 +220,8 @@ def add_edges(model, opt):
     pass
   elif opt['edge_sampling_add_type'] == 'n2_radius':
     return get_full_adjacency(num_nodes)
-  new_ei = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=2)
+  new_ei = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
+                                return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
   return new_ei
 
 
