@@ -93,8 +93,8 @@ def apply_gdc(data, opt, type="combined"):
 def make_symmetric(data):
   n = data.num_nodes
   if data.edge_attr is not None:
-    ApAT_index = torch.cat([data.edge_index, data.edge_index[[1, 0], :]], dim=1)
-    ApAT_value = torch.cat([data.edge_attr, data.edge_attr], dim=0)
+    ApAT_index = torch.cat([data.edge_index, data.edge_index[:,[1, 0], :]], dim=2)
+    ApAT_value = torch.cat([data.edge_attr, data.edge_attr], dim=1)
     ei, ew = coalesce(ApAT_index, ApAT_value, n, n, op="add")
   else:
     ei = to_undirected(data.edge_index)
@@ -180,20 +180,20 @@ def add_outgoing_attention_edges(model, M):
   add new edges for nodes that other nodes tend to pay attention to
   :params M: The number of edges to add. 2 * M get added to the edges index to make them undirected
   """
-  atts = model.odeblock.odefunc.attention_weights.mean(dim=1)
+  atts = model.odeblock.odefunc.attention_weights.mean(dim=2)
   dst = model.odeblock.odefunc.edge_index[1, :]
 
-  importance = scatter(atts, dst, dim=0, dim_size=model.num_nodes,
+  importance = scatter(atts, dst, dim=1, dim_size=model.num_nodes,
                        reduce='sum').to(model.device)  # column sum to represent outgoing importance
-  degree = scatter(torch.ones(size=atts.shape, device=model.device), dst, dim=0, dim_size=model.num_nodes,
+  degree = scatter(torch.ones(size=atts.shape, device=model.device), dst, dim=1, dim_size=model.num_nodes,
                    reduce='sum')
   normed_importance = torch.divide(importance, degree)
   # todo squareplus might be better here.
-  importance_probs = F.softmax(normed_importance, dim=0).to(model.device)
+  importance_probs = F.softmax(normed_importance, dim=1).to(model.device)
   anchors = torch.multinomial(importance_probs, M, replacement=True).to(model.device)
   anchors2 = torch.multinomial(torch.ones(model.num_nodes, device=model.device), M, replacement=True).to(model.device)
 
-  new_edges = torch.cat([torch.stack([anchors, anchors2], dim=0), torch.stack([anchors2, anchors], dim=0)], dim=1)
+  new_edges = torch.cat([torch.stack([anchors, anchors2], dim=1), torch.stack([anchors2, anchors], dim=1)], dim=2)
   return new_edges
 
 
@@ -204,23 +204,23 @@ def add_edges(model, opt):
   M = int(num_edges * opt['edge_sampling_add'])
   # generate new edges and add to edge_index
   if opt['edge_sampling_add_type'] == 'random':
-    new_edges = np.random.choice(num_nodes, size=(2, M), replace=True, p=None)
+    new_edges = np.random.choice(num_nodes, size=(opt['batch_size'], 2, M), replace=True, p=None)
     new_edges = torch.tensor(new_edges, device=model.device)
     new_edges2 = new_edges[[1, 0], :]
-    cat = torch.cat([model.odeblock.odefunc.edge_index, new_edges, new_edges2], dim=1)
+    cat = torch.cat([model.odeblock.odefunc.edge_index, new_edges, new_edges2], dim=2)
   elif opt['edge_sampling_add_type'] == 'anchored':
     pass
   elif opt['edge_sampling_add_type'] == 'importance':
     if M > 0:
       new_edges = add_outgoing_attention_edges(model, M)
-      cat = torch.cat([model.odeblock.odefunc.edge_index, new_edges], dim=1)
+      cat = torch.cat([model.odeblock.odefunc.edge_index, new_edges], dim=2)
     else:
       cat = model.odeblock.odefunc.edge_index
   elif opt['edge_sampling_add_type'] == 'degree':  # proportional to degree
     pass
   elif opt['edge_sampling_add_type'] == 'n2_radius':
     return get_full_adjacency(num_nodes)
-  new_ei = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=1)
+  new_ei = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=2)
   return new_ei
 
 

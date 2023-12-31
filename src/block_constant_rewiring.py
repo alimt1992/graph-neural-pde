@@ -45,8 +45,7 @@ class ConstantODEblock(ODEblock):
       new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
-      no_repeats = self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
-                                                  return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
+      no_repeats = self.edge_index = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=2)
       self.data_edge_index = no_repeats
 
   def add_khop_edges(self, k):
@@ -58,8 +57,7 @@ class ConstantODEblock(ODEblock):
                             self.odefunc.edge_index, self.odefunc.edge_weight, n, n, n, coalesced=False)
     self.edge_weight = 0.5 * self.edge_weight + 0.5 * new_weights
     cat = torch.cat([self.data_edge_index, new_edges], dim=2)
-    self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
-                                   return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
+    self.edge_index = torch.unique(cat, sorted=False, return_inverse=False, return_counts=False, dim=2)
     # threshold
     # normalise
 
