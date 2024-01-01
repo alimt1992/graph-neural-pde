@@ -43,14 +43,14 @@ class ODEFuncAtt(ODEFunc):
         dim=1)
     return ax
 
-  def forward(self, t, x):  # t is needed when called by the integrator
+  def forward(self, t, x, y=None):  # t is needed when called by the integrator
 
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException
 
     self.nfe += 1
 
-    attention, wx = self.multihead_att_layer(x, self.edge_index)
+    attention, wx = self.multihead_att_layer(x, self.edge_index, y)
     ax = self.multiply_attention(x, attention, wx)
     # todo would be nice if this was more efficient
 
@@ -102,7 +102,20 @@ class SpGraphAttentionLayer(nn.Module):
 
     self.leakyrelu = nn.LeakyReLU(self.alpha)
 
-  def forward(self, x, edge):
+    #if there is other modality
+    if self.opt['multi_modal']:
+      self.Q2 = nn.Linear(in_features, in_features)
+      self.init_weights(self.Q2)
+      self.V2 = nn.Linear(opt['second_modality_dim'], in_features)
+      self.init_weights(self.V2)
+      self.K2 = nn.Linear(opt['second_modality_dim'], in_features)
+      self.init_weights(self.K2)
+
+  def forward(self, x, edge, y=None):
+
+    if self.opt['multi_modal']:
+        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+    
     wx = torch.mm(x, self.W)  # h: N x out
     h = wx.view(self.opt['batch_size'], -1, self.h, self.d_k)
     h = h.transpose(2, 3)

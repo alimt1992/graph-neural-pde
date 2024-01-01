@@ -12,7 +12,7 @@ import scipy.sparse as sp
 import h5py
 
 def get_image_opt(opt):
-  opt['im_dataset'] = 'MNIST'  #datasets = ['MNIST','CIFAR']
+#   opt['im_dataset'] = 'MNIST'  #datasets = ['MNIST','CIFAR']
 
   opt['input_dropout'] = 0.5
   opt['dropout'] = 0
@@ -45,6 +45,15 @@ def get_image_opt(opt):
   elif opt['im_dataset'] == 'CIFAR':
     opt['im_width'] = 32
     opt['im_height'] = 32
+    opt['im_chan'] = 3
+    # ????
+    opt['hidden_dim'] = 3 #16    #### 1 or 3 rgb?
+    opt['num_feature'] = 3  # 1433   #### 1 or 3 rgb?
+    opt['num_class'] = 10  # 7  #### mnist digits
+
+  elif opt['im_dataset'] == 'CLEVR':
+    opt['im_width'] = 224
+    opt['im_height'] = 224
     opt['im_chan'] = 3
     # ????
     opt['hidden_dim'] = 3 #16    #### 1 or 3 rgb?

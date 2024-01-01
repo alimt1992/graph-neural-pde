@@ -26,21 +26,21 @@ class ODEFuncTransformerAtt(ODEFunc):
     # todo would be nice if this was more efficient
     if self.opt['mix_features']:
       vx = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, idx], v.shape[0], v.shape[0], v[:, :, idx]) for idx in
-         range(self.opt['heads'])], dim=0),
-        dim=0)
+        [torch_sparse.spmm(self.edge_index, attention[:, :, idx], v.shape[1], v.shape[1], v[:, :, :, idx]) for idx in
+         range(self.opt['heads'])], dim=1),
+        dim=1)
       ax = self.multihead_att_layer.Wout(vx)
     else:
-      mean_attention = attention.mean(dim=1)
-      ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[0], x.shape[0], x)
+      mean_attention = attention.mean(dim=2)
+      ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
     return ax
 
-  def forward(self, t, x):  # t is needed when called by the integrator
+  def forward(self, t, x, y=None):  # t is needed when called by the integrator
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException
 
     self.nfe += 1
-    attention, values = self.multihead_att_layer(x, self.edge_index)
+    attention, values = self.multihead_att_layer(x, self.edge_index, y)
     ax = self.multiply_attention(x, attention, values)
 
     if not self.opt['no_alpha_sigmoid']:
@@ -168,29 +168,29 @@ class SpGraphTransAttentionLayer(nn.Module):
       kx = self.Kx(x)
       vx = self.Vx(x)
       # perform linear operation and split into h heads
-      kx = kx.view(-1, self.h, self.d_k)
-      qx = qx.view(-1, self.h, self.d_k)
-      vx = vx.view(-1, self.h, self.d_k)
+      kx = kx.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      qx = qx.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      vx = vx.view(self.opt['batch_size'], -1, self.h, self.d_k)
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
-      kx = kx.transpose(1, 2)
-      qx = qx.transpose(1, 2)
-      vx = vx.transpose(1, 2)
-      src_x = qx[edge[0, :], :, :]
-      dst_x = kx[edge[1, :], :, :]
+      kx = kx.transpose(2, 3)
+      qx = qx.transpose(2, 3)
+      vx = vx.transpose(2, 3)
+      src_x = qx[self.opt['batch_size'], edge[0, :], :, :]
+      dst_x = kx[self.opt['batch_size'], edge[1, :], :, :]
 
       qp = self.Qp(p)
       kp = self.Kp(p)
       vp = self.Vp(p)
       # perform linear operation and split into h heads
-      kp = kp.view(-1, self.h, self.d_k)
-      qp = qp.view(-1, self.h, self.d_k)
-      vp = vp.view(-1, self.h, self.d_k)
+      kp = kp.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      qp = qp.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      vp = vp.view(self.opt['batch_size'], -1, self.h, self.d_k)
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
-      kp = kp.transpose(1, 2)
-      qp = qp.transpose(1, 2)
-      vp = vp.transpose(1, 2)
-      src_p = qp[edge[0, :], :, :]
-      dst_p = kp[edge[1, :], :, :]
+      kp = kp.transpose(2, 3)
+      qp = qp.transpose(2, 3)
+      vp = vp.transpose(2, 3)
+      src_p = qp[self.opt['batch_size'], edge[0, :], :, :]
+      dst_p = kp[self.opt['batch_size'], edge[1, :], :, :]
 
       prods = self.output_var_x ** 2 * torch.exp(
         -torch.sum((src_x - dst_x) ** 2, dim=1) / (2 * self.lengthscale_x ** 2)) \
@@ -210,32 +210,32 @@ class SpGraphTransAttentionLayer(nn.Module):
 
       # perform linear operation and split into h heads
 
-      k = k.view(-1, self.h, self.d_k)
-      q = q.view(-1, self.h, self.d_k)
-      v = v.view(-1, self.h, self.d_k)
+      k = k.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      q = q.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      v = v.view(self.opt['batch_size'], -1, self.h, self.d_k)
 
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
 
-      k = k.transpose(1, 2)
-      q = q.transpose(1, 2)
-      v = v.transpose(1, 2)
+      k = k.transpose(2, 2)
+      q = q.transpose(2, 2)
+      v = v.transpose(2, 2)
 
-      src = q[edge[0, :], :, :]
-      dst_k = k[edge[1, :], :, :]
+      src = q[self.opt['batch_size'], edge[0, :], :, :]
+      dst_k = k[self.opt['batch_size'], edge[1, :], :, :]
 
     if not self.opt['beltrami'] and self.opt['attention_type'] == "exp_kernel":
-      prods = self.output_var ** 2 * torch.exp(-(torch.sum((src - dst_k) ** 2, dim=1) / (2 * self.lengthscale ** 2)))
+      prods = self.output_var ** 2 * torch.exp(-(torch.sum((src - dst_k) ** 2, dim=2) / (2 * self.lengthscale ** 2)))
     elif self.opt['attention_type'] == "scaled_dot":
-      prods = torch.sum(src * dst_k, dim=1) / np.sqrt(self.d_k)
+      prods = torch.sum(src * dst_k, dim=2) / np.sqrt(self.d_k)
     elif self.opt['attention_type'] == "cosine_sim":
-      cos = torch.nn.CosineSimilarity(dim=1, eps=1e-5)
+      cos = torch.nn.CosineSimilarity(dim=2, eps=1e-5)
       prods = cos(src, dst_k)
     elif self.opt['attention_type'] == "pearson":
-      src_mu = torch.mean(src, dim=1, keepdim=True)
-      dst_mu = torch.mean(dst_k, dim=1, keepdim=True)
+      src_mu = torch.mean(src, dim=2, keepdim=True)
+      dst_mu = torch.mean(dst_k, dim=2, keepdim=True)
       src = src - src_mu
       dst_k = dst_k - dst_mu
-      cos = torch.nn.CosineSimilarity(dim=1, eps=1e-5)
+      cos = torch.nn.CosineSimilarity(dim=2, eps=1e-5)
       prods = cos(src, dst_k)
 
     if self.opt['reweight_attention'] and self.edge_weights is not None:

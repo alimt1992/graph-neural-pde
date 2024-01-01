@@ -25,6 +25,15 @@ class LaplacianODEFunc(ODEFunc):
     self.alpha_sc = nn.Parameter(torch.ones(1))
     self.beta_sc = nn.Parameter(torch.ones(1))
 
+    #if there is other modality
+    if self.opt['multi_modal']:
+      self.Q2 = nn.Linear(in_features, in_features)
+      self.init_weights(self.Q2)
+      self.V2 = nn.Linear(opt['second_modality_dim'], in_features)
+      self.init_weights(self.V2)
+      self.K2 = nn.Linear(opt['second_modality_dim'], in_features)
+      self.init_weights(self.K2)
+
   def sparse_multiply(self, x):
     if self.opt['block'] in ['attention']:  # adj is a multihead attention
       mean_attention = self.attention_weights.mean(dim=2)
@@ -35,7 +44,10 @@ class LaplacianODEFunc(ODEFunc):
       ax = torch_sparse.spmm(self.edge_index, self.edge_weight, x.shape[1], x.shape[1], x)
     return ax
 
-  def forward(self, t, x):  # the t param is needed by the ODE solver.
+  def forward(self, t, x, y=None):  # the t param is needed by the ODE solver.
+    if self.opt['multi_modal']:
+        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+    
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException
     self.nfe += 1
