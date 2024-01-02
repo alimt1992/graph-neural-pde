@@ -162,9 +162,9 @@ class SpGraphTransAttentionLayer(nn.Module):
 
       if self.opt['multi_modal']:
         dk = self.opt['hidden_dim']-self.opt['pos_enc_hidden_dim']
-        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).transpose(-2, -1) / torch.sqrt(dk)), dim=-1), self.V2(y))
+        x = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2(x), self.K2(y).transpose(-2, -1) / np.sqrt(dk)), dim=-1), self.V2(y))
         dk = self.opt['pos_enc_hidden_dim']
-        p = torch.mm(torch.nn.softmax(torch.mm(self.Q2p(p), self.K2p(y).transpose(-2, -1) / torch.sqrt(dk)), dim=-1), self.V2p(y))
+        p = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2p(p), self.K2p(y).transpose(-2, -1) / np.sqrt(dk)), dim=-1), self.V2p(y))
       
       qx = self.Qx(x)
       kx = self.Kx(x)
@@ -239,7 +239,7 @@ class SpGraphTransAttentionLayer(nn.Module):
     if not self.opt['beltrami'] and self.opt['attention_type'] == "exp_kernel":
       prods = self.output_var ** 2 * torch.exp(-(torch.sum((src - dst_k) ** 2, dim=2) / (2 * self.lengthscale ** 2)))
     elif self.opt['attention_type'] == "scaled_dot":
-      prods = torch.sum(torch.mm(src.permute(0,3,1,2), dst_k.permute(0,3,2,1) / torch.sqrt(self.d_k)), dim=3).permute(0,2,1)
+      prods = torch.sum(torch.matmul(src.permute(0,3,1,2), dst_k.permute(0,3,2,1) / np.sqrt(self.d_k)), dim=3).permute(0,2,1)
     elif self.opt['attention_type'] == "cosine_sim":
       cos = torch.nn.CosineSimilarity(dim=2, eps=1e-5)
       prods = cos(src, dst_k)

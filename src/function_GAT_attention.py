@@ -114,7 +114,7 @@ class SpGraphAttentionLayer(nn.Module):
   def forward(self, x, edge, y=None):
 
     if self.opt['multi_modal']:
-        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+        x = torch.matmul(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
     
     wx = torch.mm(x, self.W)  # h: N x out
     h = wx.view(self.opt['batch_size'], -1, self.h, self.d_k)

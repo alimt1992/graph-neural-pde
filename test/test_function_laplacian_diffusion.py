@@ -29,12 +29,12 @@ class DummyDataset():
 
 class FunctionLaplacianDiffusionTests(unittest.TestCase):
   def setUp(self):
-    self.edge = tensor([[0, 1, 2, 1], [1, 0, 1, 2]])
-    self.x = tensor([[1., 2.], [3., 2.], [4., 5.]], dtype=torch.float)
+    self.edge = tensor([[[0, 1, 2, 1], [1, 0, 1, 2]]])
+    self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
     self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
     self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
-    self.edge1 = tensor([[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]])
-    self.x1 = torch.ones((3, 2), dtype=torch.float)
+    self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]])
+    self.x1 = torch.ones((1, 3, 2), dtype=torch.float)
     self.data = Data(x=self.x, edge_index=self.edge)
 
     self.leakyrelu = nn.LeakyReLU(0.2)
@@ -43,7 +43,7 @@ class FunctionLaplacianDiffusionTests(unittest.TestCase):
                 'K': 10,
                 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
                 'hidden_dim': 6, 'augment': False, 'adjoint': False,
-                'block': 'constant', 'function': 'laplacian',
+                'block': 'constant', 'function': 'laplacian', 'batch_size': 1, 'multi_modal': False,
                 'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
                 'rewiring': None, 'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None,
                 'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'step_size': 1, 'data_norm': 'rw',
@@ -103,4 +103,5 @@ class FunctionLaplacianDiffusionTests(unittest.TestCase):
 if __name__ == '__main__':
   tests = FunctionLaplacianDiffusionTests()
   tests.setUp()
+  tests.test_block_toy()
   tests.test_block_cora()
