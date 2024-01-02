@@ -161,8 +161,10 @@ class SpGraphTransAttentionLayer(nn.Module):
       x = torch.cat((x[:, :self.opt['feat_hidden_dim']], x[:, label_index:]), dim=1)
 
       if self.opt['multi_modal']:
-        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
-        p = torch.mm(torch.nn.softmax(torch.mm(self.Q2p(p), self.K2p(y).t)), self.V2p(y))
+        dk = self.opt['hidden_dim']-self.opt['pos_enc_hidden_dim']
+        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).transpose(-2, -1) / torch.sqrt(dk)), dim=-1), self.V2(y))
+        dk = self.opt['pos_enc_hidden_dim']
+        p = torch.mm(torch.nn.softmax(torch.mm(self.Q2p(p), self.K2p(y).transpose(-2, -1) / torch.sqrt(dk)), dim=-1), self.V2p(y))
       
       qx = self.Qx(x)
       kx = self.Kx(x)
@@ -175,8 +177,12 @@ class SpGraphTransAttentionLayer(nn.Module):
       kx = kx.transpose(2, 3)
       qx = qx.transpose(2, 3)
       vx = vx.transpose(2, 3)
-      src_x = qx[self.opt['batch_size'], edge[0, :], :, :]
-      dst_x = kx[self.opt['batch_size'], edge[1, :], :, :]
+
+      index0 = torch.arange(qx.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+      index2 = torch.arange(qx.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
+      index3 = torch.arange(qx.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+      src_x = qx[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
+      dst_x = kx[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
 
       qp = self.Qp(p)
       kp = self.Kp(p)
@@ -189,13 +195,17 @@ class SpGraphTransAttentionLayer(nn.Module):
       kp = kp.transpose(2, 3)
       qp = qp.transpose(2, 3)
       vp = vp.transpose(2, 3)
-      src_p = qp[self.opt['batch_size'], edge[0, :], :, :]
-      dst_p = kp[self.opt['batch_size'], edge[1, :], :, :]
+
+      index0 = torch.arange(qp.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+      index2 = torch.arange(qp.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
+      index3 = torch.arange(qp.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+      src_p = qp[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
+      dst_p = kp[index0, edge[:, 1, :].unsqueeze(2).unsqueeze(2), index2, index3]
 
       prods = self.output_var_x ** 2 * torch.exp(
-        -torch.sum((src_x - dst_x) ** 2, dim=1) / (2 * self.lengthscale_x ** 2)) \
+        -torch.sum((src_x - dst_x) ** 2, dim=2) / (2 * self.lengthscale_x ** 2)) \
               * self.output_var_p ** 2 * torch.exp(
-        -torch.sum((src_p - dst_p) ** 2, dim=1) / (2 * self.lengthscale_p ** 2))
+        -torch.sum((src_p - dst_p) ** 2, dim=2) / (2 * self.lengthscale_p ** 2))
 
       v = None
 
@@ -216,17 +226,20 @@ class SpGraphTransAttentionLayer(nn.Module):
 
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
 
-      k = k.transpose(2, 2)
-      q = q.transpose(2, 2)
-      v = v.transpose(2, 2)
+      k = k.transpose(2, 3)
+      q = q.transpose(2, 3)
+      v = v.transpose(2, 3)
 
-      src = q[self.opt['batch_size'], edge[0, :], :, :]
-      dst_k = k[self.opt['batch_size'], edge[1, :], :, :]
+      index0 = torch.arange(q.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
+      index2 = torch.arange(q.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
+      index3 = torch.arange(q.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+      src = q[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
+      dst_k = k[index0, edge[:, 1, :].unsqueeze(2).unsqueeze(2), index2, index3]
 
     if not self.opt['beltrami'] and self.opt['attention_type'] == "exp_kernel":
       prods = self.output_var ** 2 * torch.exp(-(torch.sum((src - dst_k) ** 2, dim=2) / (2 * self.lengthscale ** 2)))
     elif self.opt['attention_type'] == "scaled_dot":
-      prods = torch.sum(src * dst_k, dim=2) / np.sqrt(self.d_k)
+      prods = torch.sum(torch.mm(src.permute(0,3,1,2), dst_k.permute(0,3,2,1) / torch.sqrt(self.d_k)), dim=3).permute(0,2,1)
     elif self.opt['attention_type'] == "cosine_sim":
       cos = torch.nn.CosineSimilarity(dim=2, eps=1e-5)
       prods = cos(src, dst_k)
@@ -239,11 +252,11 @@ class SpGraphTransAttentionLayer(nn.Module):
       prods = cos(src, dst_k)
 
     if self.opt['reweight_attention'] and self.edge_weights is not None:
-      prods = prods * self.edge_weights.unsqueeze(dim=1)
+      prods = prods * self.edge_weights.unsqueeze(dim=2)
     if self.opt['square_plus']:
-      attention = squareplus(prods, edge[self.opt['attention_norm_idx']])
+      attention = torch.stack([squareplus(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
     else:
-      attention = softmax(prods, edge[self.opt['attention_norm_idx']])
+      attention = torch.stack([softmax(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
     return attention, (v, prods)
 
   def __repr__(self):

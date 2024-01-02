@@ -32,13 +32,13 @@ class ODEFuncAtt(ODEFunc):
   def multiply_attention(self, x, attention, wx):
     if self.opt['mix_features']:
       wx = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, idx], wx.shape[1], wx.shape[1], wx) for idx in
+        [torch_sparse.spmm(self.edge_index, attention[:, :, idx], wx.shape[1], wx.shape[1], wx) for idx in
          range(self.opt['heads'])], dim=1),
         dim=1)
       ax = torch.mm(wx, self.multihead_att_layer.Wout)
     else:
       ax = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, idx], x.shape[1], x.shape[1], x) for idx in
+        [torch_sparse.spmm(self.edge_index, attention[:, :, idx], x.shape[1], x.shape[1], x) for idx in
          range(self.opt['heads'])], dim=1),
         dim=1)
     return ax
@@ -127,7 +127,7 @@ class SpGraphAttentionLayer(nn.Module):
     edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3], h[:, edge[:, 1, :], index2, index3]), dim=1).transpose(1, 2).to(
       self.device)  # edge: 2*D x E
     edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
-    attention = softmax(edge_e, edge[self.opt['attention_norm_idx']])
+    attention = torch.stack([softmax(edge_e[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(edge_e.shape[0])], dim=0)###
     return attention, wx
 
   def __repr__(self):
