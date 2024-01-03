@@ -124,7 +124,7 @@ class SpGraphAttentionLayer(nn.Module):
     index0 = torch.arange(h.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
     index2 = torch.arange(h.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
     index3 = torch.arange(h.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3], h[:, edge[:, 1, :], index2, index3]), dim=1).transpose(1, 2).to(
+    edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3], h[:, edge[:, 1, :].unsqueeze(2).unsqueeze(2), index2, index3]), dim=1).transpose(1, 2).to(
       self.device)  # edge: 2*D x E
     edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
     attention = torch.stack([softmax(edge_e[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(edge_e.shape[0])], dim=0)###

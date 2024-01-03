@@ -45,12 +45,12 @@ class AttentionTests(unittest.TestCase):
     h = torch.matmul(self.x, self.W)
     index0 = torch.arange(h.shape[0]).unsqueeze(1).unsqueeze(2)
     index2 = torch.arange(h.shape[2]).unsqueeze(0).unsqueeze(0)
-    edge_h = torch.cat((h[index0, self.edge[:, 0, :], index2], h[index0, self.edge[:, 1, :], index2]), dim=2)
+    edge_h = torch.cat((h[index0, self.edge[:, 0, :].unsqueeze(2), index2], h[index0, self.edge[:, 1, :].unsqueeze(2), index2]), dim=2)
     self.assertTrue(edge_h.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 2 * 2]))
     ah = self.alpha.matmul(edge_h.transpose(1,2)).transpose(1,2)
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
-    attention = softmax(edge_e, self.edge[2])
+    attention = softmax(edge_e[0], self.edge[0,1])
     print(attention)
 
   def test_function(self):
@@ -58,14 +58,14 @@ class AttentionTests(unittest.TestCase):
     out_features = self.x.shape[2]
 
     def get_round_sum(tens, n_digits=3):
-      val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']))
+      val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']) + 1)
       return (val * 10 ** n_digits).round() / (10 ** n_digits)
 
     att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
     attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
     self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
-    dense_attention1 = to_dense_adj(self.edge, edge_attr=attention[0, :, 0]).squeeze()
-    dense_attention2 = to_dense_adj(self.edge, edge_attr=attention[0, :, 1]).squeeze()
+    dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+    dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
 
     self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention1), 1.)))
     self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention2), 1.)))
@@ -82,8 +82,8 @@ class AttentionTests(unittest.TestCase):
     attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
 
     self.assertTrue(attention.shape == (data.edge_index.shape[0], data.edge_index.shape[2], self.opt['heads']))
-    dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[0, :, 0]).squeeze()
-    dense_attention2 = to_dense_adj(data.edge_index, edge_attr=attention[0, :, 1]).squeeze()
+    dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+    dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
     self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention1), 1.)))
     self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention2), 1.)))
     self.assertTrue(torch.all(attention > 0.))

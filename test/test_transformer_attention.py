@@ -46,12 +46,12 @@ class AttentionTests(unittest.TestCase):
 
     index0 = torch.arange(h.shape[0]).unsqueeze(1).unsqueeze(2)
     index2 = torch.arange(h.shape[2]).unsqueeze(0).unsqueeze(0)
-    edge_h = torch.cat((h[index0, self.edge[:, 0, :], index2], h[index0, self.edge[:, 1, :], index2]), dim=2)
+    edge_h = torch.cat((h[index0, self.edge[:, 0, :].unsqueeze(2), index2], h[index0, self.edge[:, 1, :].unsqueeze(2), index2]), dim=2)
     self.assertTrue(edge_h.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 2 * 2]))
     ah = self.alpha.matmul(edge_h.transpose(1,2)).transpose(1,2)
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
-    attention = softmax(edge_e, self.edge[2])
+    attention = softmax(edge_e[0], self.edge[0, 1])
     print(attention)
 
   def test_function(self):
@@ -60,11 +60,11 @@ class AttentionTests(unittest.TestCase):
     att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
     attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
     self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
-    dense_attention1 = to_dense_adj(self.edge, edge_attr=attention[0, :, 0]).squeeze()
-    dense_attention2 = to_dense_adj(self.edge, edge_attr=attention[0, :, 1]).squeeze()
+    dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+    dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
 
     def get_round_sum(tens, n_digits=3):
-      val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']))
+      val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']) + 1)
       round_sum = (val * 10 ** n_digits).round() / (10 ** n_digits)
       print('round sum', round_sum)
       return round_sum
@@ -76,14 +76,14 @@ class AttentionTests(unittest.TestCase):
 
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', True)
     data = dataset.data
-    in_features = data.x.shape[1]
-    out_features = data.x.shape[1]
+    in_features = data.x.shape[2]
+    out_features = data.x.shape[2]
 
     att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
     attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
-    self.assertTrue(attention.shape == (data.edge_index.shape[1], self.opt['heads']))
-    dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[0, :, 0]).squeeze()
-    dense_attention2 = to_dense_adj(data.edge_index, edge_attr=attention[0, :, 1]).squeeze()
+    self.assertTrue(attention.shape == (data.edge_index.shape[2], self.opt['heads']))
+    dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+    dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
     print('sums:', torch.sum(torch.isclose(dense_attention1, torch.ones(size=dense_attention1.shape))), dense_attention1.shape)
     print('da1', dense_attention1)
     print('da2', dense_attention2)
@@ -106,7 +106,7 @@ class AttentionTests(unittest.TestCase):
     t = 1
     out_dim = 6
     func = ODEFuncTransformerAtt(dataset.data.num_features, out_dim, self.opt, dataset.data, self.device)
-    out = func(t, dataset.data.x)
+    out = func(t, dataset.data.x.to(self.device))
     print(out.shape)
     self.assertTrue(out.shape == (dataset.data.num_nodes, dataset.num_features))
 
@@ -116,11 +116,22 @@ class AttentionTests(unittest.TestCase):
     self.opt['head'] = 4
     att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
     attention, _ = att_layer(self.x, self.edge)
-    ax1 = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge, attention[:, :, idx], self.x.shape[1], self.x.shape[1], self.x) for idx in
-         range(self.opt['heads'])], dim=1), dim=1)
-    mean_attention = attention.mean(dim=1)
-    ax2 = torch_sparse.spmm(self.edge, mean_attention, self.x.shape[1], self.x.shape[1], self.x)
+
+    index0 = torch.arange(self.edge.shape[0])[:, None, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).faltten()
+    index1 = self.edge[:,0][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+    index2 = self.edge[:,1][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+    index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+    indices = torch.stack([index0, index1, index2, index3] , dim=0)
+    sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [self.x.shape[0], self.x.shape[1], self.x.shape[1], self.opt['heads']],
+                                         requires_grad=True).to(self.device)
+    ax1 = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2), self.x), dim=1)
+    mean_attention = sparse_att.mean(dim=2)
+    ax2 = torch.matmul(mean_attention, self.x)
+    # ax1 = torch.mean(torch.stack(
+    #     [torch_sparse.spmm(self.edge, attention[:, :, idx], self.x.shape[1], self.x.shape[1], self.x) for idx in
+    #      range(self.opt['heads'])], dim=1), dim=1)
+    # mean_attention = attention.mean(dim=2)
+    # ax2 = torch_sparse.spmm(self.edge, mean_attention, self.x.shape[1], self.x.shape[1], self.x)
     self.assertTrue(torch.all(torch.isclose(ax1,ax2)))
 
   def test_two_way_edge(self):
