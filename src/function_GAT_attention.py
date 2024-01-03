@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 from torch_geometric.utils import softmax
 import torch_sparse
 from torch_geometric.utils.loop import add_remaining_self_loops
@@ -31,16 +32,33 @@ class ODEFuncAtt(ODEFunc):
 
   def multiply_attention(self, x, attention, wx):
     if self.opt['mix_features']:
-      wx = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, :, idx], wx.shape[1], wx.shape[1], wx) for idx in
-         range(self.opt['heads'])], dim=1),
-        dim=1)
-      ax = torch.mm(wx, self.multihead_att_layer.Wout)
+      # wx = torch.mean(torch.stack(
+      #   [torch_sparse.spmm(self.edge_index, attention[:, :, idx], wx.shape[1], wx.shape[1], wx) for idx in
+      #    range(self.opt['heads'])], dim=1),
+      #   dim=1)
+      # ax = torch.mm(wx, self.multihead_att_layer.Wout)
+      index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      indices = torch.stack([index0, index1, index2, index3] , dim=0)
+      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [wx.shape[0], wx.shape[1], wx.shape[1], self.opt['heads']],
+                                           requires_grad=True).to(self.device)
+      wx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), wx.unsqueeze(1)), dim=1)
+      ax = torch.matmul(wx, self.multihead_att_layer.Wout)
     else:
-      ax = torch.mean(torch.stack(
-        [torch_sparse.spmm(self.edge_index, attention[:, :, idx], x.shape[1], x.shape[1], x) for idx in
-         range(self.opt['heads'])], dim=1),
-        dim=1)
+      # ax = torch.mean(torch.stack(
+      #   [torch_sparse.spmm(self.edge_index, attention[:, :, idx], x.shape[1], x.shape[1], x) for idx in
+      #    range(self.opt['heads'])], dim=1),
+      #   dim=1)
+      index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      indices = torch.stack([index0, index1, index2, index3] , dim=0)
+      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [x.shape[0], x.shape[1], x.shape[1], self.opt['heads']],
+                                           requires_grad=True).to(self.device)
+      ax = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), x.unsqueeze(1)), dim=1)
     return ax
 
   def forward(self, t, x, y=None):  # t is needed when called by the integrator
@@ -114,9 +132,10 @@ class SpGraphAttentionLayer(nn.Module):
   def forward(self, x, edge, y=None):
 
     if self.opt['multi_modal']:
-        x = torch.matmul(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+        dk = self.in_features
+        x = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2(x), self.K2(y).transpose(-2, -1) / np.sqrt(dk))), self.V2(y))
     
-    wx = torch.mm(x, self.W)  # h: N x out
+    wx = torch.matmul(x, self.W)  # h: N x out
     h = wx.view(self.opt['batch_size'], -1, self.h, self.d_k)
     h = h.transpose(2, 3)
 

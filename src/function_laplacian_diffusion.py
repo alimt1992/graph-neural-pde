@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 import torch_sparse
 
 from base_classes import ODEFunc
@@ -35,18 +36,32 @@ class LaplacianODEFunc(ODEFunc):
       self.init_weights(self.K2)
 
   def sparse_multiply(self, x):
+    index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+    index1 = self.edge[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+    index2 = self.edge[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+    indices = torch.stack([index0, index1, index2] , dim=0)
     if self.opt['block'] in ['attention']:  # adj is a multihead attention
       mean_attention = self.attention_weights.mean(dim=2)
-      ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
+      # ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
+      sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                           requires_grad=True).to(self.device)
+      ax = torch.matmul(sparse_att.to_dense(), x)
     elif self.opt['block'] in ['mixed', 'hard_attention']:  # adj is a torch sparse matrix
-      ax = torch_sparse.spmm(self.edge_index, self.attention_weights, x.shape[1], x.shape[1], x)
+      # ax = torch_sparse.spmm(self.edge_index, self.attention_weights, x.shape[1], x.shape[1], x)
+      sparse_att = torch.sparse_coo_tensor(indices, self.attention_weights.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                           requires_grad=True).to(self.device)
+      ax = torch.matmul(sparse_att.to_dense(), x)
     else:  # adj is a torch sparse matrix
-      ax = torch_sparse.spmm(self.edge_index, self.edge_weight, x.shape[1], x.shape[1], x)
+      # ax = torch_sparse.spmm(self.edge_index, self.edge_weight, x.shape[1], x.shape[1], x)
+      sparse_att = torch.sparse_coo_tensor(indices, self.edge_weight.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                           requires_grad=True).to(self.device)
+      ax = torch.matmul(sparse_att.to_dense(), x)
     return ax
 
   def forward(self, t, x, y=None):  # the t param is needed by the ODE solver.
     if self.opt['multi_modal']:
-        x = torch.mm(torch.nn.softmax(torch.mm(self.Q2(x), self.K2(y).t)), self.V2(y))
+        dk = self.in_features
+        x = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2(x), self.K2(y).transpose(-2, -1) / np.sqrt(dk))), self.V2(y))
     
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException
