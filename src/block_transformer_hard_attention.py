@@ -53,8 +53,10 @@ class HardAttODEblock(ODEblock):
       with torch.no_grad():
         mean_att = attention_weights.mean(dim=2, keepdim=False)
         if self.opt['use_flux']:
-          src_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 0, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
-          dst_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 1, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
+          index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
+          index2 = torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)
+          src_features = x[index0, self.data_edge_index[:, 0, :].unsqueeze(1), index2]
+          dst_features = x[index0, self.data_edge_index[:, 1, :].unsqueeze(1), index2]
           delta = torch.linalg.norm(src_features-dst_features, dim=1)
           mean_att = mean_att * delta
         threshold = torch.quantile(mean_att, 1-self.opt['att_samp_pct'])

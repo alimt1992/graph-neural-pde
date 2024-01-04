@@ -21,15 +21,15 @@ from test_params import OPT
 
 class AttentionTests(unittest.TestCase):
   def setUp(self):
-    self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]])
-    self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
-    self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
-    self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
-    self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]])
-    self.x1 = torch.ones((1, 3, 2), dtype=torch.float)
-
-    self.leakyrelu = nn.LeakyReLU(0.2)
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]]).to(self.device)
+    self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float).to(self.device)
+    self.W = tensor([[2, 1], [3, 2]], dtype=torch.float).to(self.device)
+    self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float).to(self.device)
+    self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]]).to(self.device)
+    self.x1 = torch.ones((1, 3, 2), dtype=torch.float).to(self.device)
+
+    self.leakyrelu = nn.LeakyReLU(0.2).to(self.device)
     opt = {'dataset': 'Cora', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2,
                 'K': 10,
                 'attention_norm_idx': 0, 'add_source': False, 'max_nfe': 1000, 'mix_features': False,
@@ -102,7 +102,7 @@ class AttentionTests(unittest.TestCase):
     t = 1
     out_dim = 6
     func = ODEFuncAtt(dataset.data.num_features, out_dim, self.opt, dataset.data, self.device)
-    out = func(t, dataset.data.x)
+    out = func(t, dataset.data.x.to(self.device))
     print(out.shape)
     self.assertTrue(out.shape == (dataset.data.num_nodes, dataset.num_features))
 

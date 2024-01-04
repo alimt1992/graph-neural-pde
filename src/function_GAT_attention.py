@@ -38,8 +38,8 @@ class ODEFuncAtt(ODEFunc):
       #   dim=1)
       # ax = torch.mm(wx, self.multihead_att_layer.Wout)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       indices = torch.stack([index0, index1, index2, index3] , dim=0)
       sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [wx.shape[0], wx.shape[1], wx.shape[1], self.opt['heads']],
@@ -52,8 +52,8 @@ class ODEFuncAtt(ODEFunc):
       #    range(self.opt['heads'])], dim=1),
       #   dim=1)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       indices = torch.stack([index0, index1, index2, index3] , dim=0)
       sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [x.shape[0], x.shape[1], x.shape[1], self.opt['heads']],

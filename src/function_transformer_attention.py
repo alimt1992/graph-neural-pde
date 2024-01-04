@@ -30,8 +30,8 @@ class ODEFuncTransformerAtt(ODEFunc):
       #    range(self.opt['heads'])], dim=1),
       #   dim=1)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       indices = torch.stack([index0, index1, index2, index3] , dim=0)
       sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [v.shape[0], v.shape[1], v.shape[1], self.opt['heads']],
@@ -42,8 +42,8 @@ class ODEFuncTransformerAtt(ODEFunc):
       mean_attention = attention.mean(dim=2)
       # ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
       index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index1 = self.edge[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index2 = self.edge[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
                                            requires_grad=True).to(self.device)

@@ -37,8 +37,8 @@ class LaplacianODEFunc(ODEFunc):
 
   def sparse_multiply(self, x):
     index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-    index1 = self.edge[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-    index2 = self.edge[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+    index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+    index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
     indices = torch.stack([index0, index1, index2] , dim=0)
     if self.opt['block'] in ['attention']:  # adj is a multihead attention
       mean_attention = self.attention_weights.mean(dim=2)

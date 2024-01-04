@@ -40,26 +40,56 @@ class ConstantODEblock(ODEblock):
 
     # M = self.opt["M_nodes"]
     M = int(self.num_nodes * (1/(1 - (1 - self.opt['att_samp_pct'])) - 1))
+    n = self.num_nodes
 
     with torch.no_grad():
       new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
-      no_repeats = self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
-                                                  return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
+      index0 = torch.arange(cat.shape[0])[:, None].expand(cat.shape[0], cat.shape[2]).flatten()
+      index1 = cat[:,0].flatten()
+      index2 = cat[:,1].flatten()
+      indices = torch.stack([index0, index1, index2] , dim=0)
+      edge_mat = torch.sparse_coo_tensor(indices, torch.ones(cat.shape[0], cat.shape(2)), [cat.shape[0], n, n],
+                                         requires_grad=True).to(self.device).to_dense()
+      nonzero_mask = torch.zeros_like(edge_mat)
+      nonzero_mask[edge_mat != 0] = 1
+      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(cat.shape[0], n*n, 2)
+      new_edges = new_edges * nonzero_mask
+      sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+      no_repeats = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
       self.data_edge_index = no_repeats
 
   def add_khop_edges(self, k):
     n = self.num_nodes
     # do k_hop
     for i in range(k):
-      new_edges, new_weights = \
-        torch_sparse.spspmm(self.odefunc.edge_index, self.odefunc.edge_weight,
-                            self.odefunc.edge_index, self.odefunc.edge_weight, n, n, n, coalesced=False)
-    self.edge_weight = 0.5 * self.edge_weight + 0.5 * new_weights
-    cat = torch.cat([self.data_edge_index, new_edges], dim=2)
-    self.edge_index = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
-                                   return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
+      index0 = torch.arange(self.odefunc.edge_index.shape[0])[:, None].expand(self.odefunc.edge_index.shape[0], self.odefunc.edge_index.shape[2]).flatten()
+      index1 = self.odefunc.edge_index[:,0].flatten()
+      index2 = self.odefunc.edge_index[:,1].flatten()
+      indices = torch.stack([index0, index1, index2] , dim=0)
+      weight_mat = torch.sparse_coo_tensor(indices, self.odefunc.edge_weight.flatten(), [self.odefunc.edge_index.shape[0], n, n],
+                                                requires_grad=True).to(self.device).to_dense()
+      new_weights = torch.matmul(weight_mat, weight_mat)
+      edge_weights = 0.5 * weight_mat + 0.5 * new_weights
+      zero_mask = 1-torch.eye(n)[None,:,:].expand(self.odefunc.edge_index.shape[0], n, n)
+      edge_weights = edge_weights * zero_mask
+      
+      nonzero_mask = torch.zeros_like(edge_weights)
+      nonzero_mask[new_weights != 0] = 1
+      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(self.odefunc.edge_index.shape[0], n*n, 2)
+      new_edges = new_edges * nonzero_mask
+      sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+      new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+      
+      index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
+      index1 = new_edges[:, 0, :]
+      index2 = new_edges[:, 1, :]
+      self.edge_weight = edge_weights[index0, index1, index2]
+      self.odefunc.edge_weight = self.edge_weight
+      self.data_edge_index = new_edges
     # threshold
     # normalise
 
@@ -87,8 +117,10 @@ class ConstantODEblock(ODEblock):
       with torch.no_grad():
         mean_att = attention_weights.mean(dim=2, keepdim=False)
         if self.opt['use_flux']:
-          src_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 0, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
-          dst_features = x[torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2), self.data_edge_index[:, 1, :].unsqueeze(2), torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)]
+          index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
+          index2 = torch.arange(x.shape[2]).unsqueeze(0).unsqueeze(0)
+          src_features = x[index0, self.data_edge_index[:, 0, :].unsqueeze(1), index2]
+          dst_features = x[index0, self.data_edge_index[:, 1, :].unsqueeze(1), index2]
           delta = torch.linalg.norm(src_features - dst_features, dim=2)
           mean_att = mean_att * delta
         threshold = torch.quantile(mean_att, 1-self.opt['att_samp_pct'])
