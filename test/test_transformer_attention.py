@@ -113,44 +113,51 @@ class AttentionTests(unittest.TestCase):
     func = ODEFuncTransformerAtt(dataset.data.num_features, out_dim, self.opt, self.device)
     func.edge_index = dataset.data.edge_index.to(self.device)
     out = func(t, dataset.data.x.to(self.device))
-    self.assertTrue(out.shape == (dataset.data.num_nodes, dataset.num_features))
+    self.assertTrue(out.shape == dataset.data.x.shape)
 
   def test_head_aggregation(self):
-    in_features = self.x.shape[2]
-    out_features = self.x.shape[2]
-    self.opt['head'] = 4
-    att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
-    attention, _ = att_layer(self.x, self.edge)
-
-    # ax1 = torch.mean(torch.stack(
-    #     [torch_sparse.spmm(self.edge, attention[:, :, idx], self.x.shape[1], self.x.shape[1], self.x) for idx in
-    #      range(self.opt['heads'])], dim=1), dim=1)
-    # mean_attention = attention.mean(dim=2)
-    # ax2 = torch_sparse.spmm(self.edge, mean_attention, self.x.shape[1], self.x.shape[1], self.x)
-
-    index0 = torch.arange(self.edge.shape[0])[:, None, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
-    index1 = self.edge[:,0][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
-    index2 = self.edge[:,1][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
-    index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
-    indices = torch.stack([index0, index1, index2, index3] , dim=0)
-    sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [self.x.shape[0], self.x.shape[1], self.x.shape[1], self.opt['heads']],
-                                         requires_grad=True).to(self.device)
-    ax1 = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), self.x), dim=1)
-
-    mean_attention = attention.mean(dim=2)
-    index0 = torch.arange(self.edge.shape[0])[:, None].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
-    index1 = self.edge[:,0].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
-    index2 = self.edge[:,1].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
-    indices = torch.stack([index0, index1, index2] , dim=0)
-    sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [self.x.shape[0], self.x.shape[1], self.x.shape[1]],
-                                         requires_grad=True).to(self.device)
-    ax2 = torch.matmul(sparse_att.to_dense(), self.x)
-    self.assertTrue(torch.all(torch.isclose(ax1,ax2)))
+    with (torch.device(self.device)):
+      in_features = self.x.shape[2]
+      out_features = self.x.shape[2]
+      self.opt['head'] = 4
+      att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
+      attention, _ = att_layer(self.x, self.edge)
+  
+      # ax1 = torch.mean(torch.stack(
+      #     [torch_sparse.spmm(self.edge, attention[:, :, idx], self.x.shape[1], self.x.shape[1], self.x) for idx in
+      #      range(self.opt['heads'])], dim=1), dim=1)
+      # mean_attention = attention.mean(dim=2)
+      # ax2 = torch_sparse.spmm(self.edge, mean_attention, self.x.shape[1], self.x.shape[1], self.x)
+  
+      index0 = torch.arange(self.edge.shape[0])[:, None, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+      index1 = self.edge[:,0][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+      index2 = self.edge[:,1][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
+      indices = torch.stack([index0, index1, index2, index3] , dim=0)
+      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [self.x.shape[0], self.x.shape[1], self.x.shape[1], self.opt['heads']],
+                                           requires_grad=True).to(self.device)
+      ax1 = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), self.x), dim=1)
+  
+      mean_attention = attention.mean(dim=2)
+      index0 = torch.arange(self.edge.shape[0])[:, None].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
+      index1 = self.edge[:,0].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
+      index2 = self.edge[:,1].expand(self.edge.shape[0], self.edge.shape[2]).flatten()
+      indices = torch.stack([index0, index1, index2] , dim=0)
+      sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [self.x.shape[0], self.x.shape[1], self.x.shape[1]],
+                                           requires_grad=True).to(self.device)
+      ax2 = torch.matmul(sparse_att.to_dense(), self.x)
+      self.assertTrue(torch.all(torch.isclose(ax1,ax2)))
 
   def test_two_way_edge(self):
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', False)
     edge = dataset.data.edge_index
+    dataset.data.x = dataset.data.x.squeeze()
+    dataset.data.y = dataset.data.y.squeeze()
+    dataset.data.edge_index = dataset.data.edge_index.squeeze()
     print(f"is_undirected {dataset.data.is_undirected()}")
+    dataset.data.x = dataset.data.x.unsqueeze(0)
+    dataset.data.y = dataset.data.y.unsqueeze(0)
+    dataset.data.edge_index = dataset.data.edge_index.unsqueeze(0)
 
     edge_dict = {}
 
