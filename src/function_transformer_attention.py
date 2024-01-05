@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch_geometric.utils import softmax
 import torch_sparse
-from torch_geometric.utils.loop import add_remaining_self_loops
 import numpy as np
 from data import get_dataset
 from utils import MaxNFEException, squareplus
@@ -11,24 +10,15 @@ from base_classes import ODEFunc
 
 class ODEFuncTransformerAtt(ODEFunc):
 
-  def __init__(self, in_features, out_features, opt, data, device):
-    super(ODEFuncTransformerAtt, self).__init__(opt, data, device)
+  def __init__(self, in_features, out_features, opt, device):
+    super(ODEFuncTransformerAtt, self).__init__(opt, device)
 
-    if opt['self_loop_weight'] > 0:
-      self.edge_index, self.edge_weight = add_remaining_self_loops(data.edge_index, data.edge_attr,
-                                                                   fill_value=opt['self_loop_weight'])
-    else:
-      self.edge_index, self.edge_weight = data.edge_index, data.edge_attr
     self.multihead_att_layer = SpGraphTransAttentionLayer(in_features, out_features, opt,
                                                           device, edge_weights=self.edge_weight).to(device)
 
   def multiply_attention(self, x, attention, v=None):
     # todo would be nice if this was more efficient
     if self.opt['mix_features']:
-      # vx = torch.mean(torch.stack(
-      #   [torch_sparse.spmm(self.edge_index, attention[:, :, idx], v.shape[1], v.shape[1], v[:, :, :, idx]) for idx in
-      #    range(self.opt['heads'])], dim=1),
-      #   dim=1)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
@@ -40,7 +30,6 @@ class ODEFuncTransformerAtt(ODEFunc):
       ax = self.multihead_att_layer.Wout(vx)
     else:
       mean_attention = attention.mean(dim=2)
-      # ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
       index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
       index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
       index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
@@ -287,5 +276,5 @@ if __name__ == '__main__':
          }
   dataset = get_dataset(opt, '../data', False)
   t = 1
-  func = ODEFuncTransformerAtt(dataset.data.num_features, 6, opt, dataset.data, device)
+  func = ODEFuncTransformerAtt(dataset.data.num_features, 6, opt, device)
   out = func(t, dataset.data.x)

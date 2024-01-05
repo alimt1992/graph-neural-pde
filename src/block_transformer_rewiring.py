@@ -1,29 +1,19 @@
 import torch
 from function_transformer_attention import SpGraphTransAttentionLayer
 from base_classes import ODEblock
-from utils import get_rw_adj
 from torch_scatter import scatter
 import numpy as np
 import torch_sparse
-from .utils import remove_self_loops
+from utils import get_rw_adj, remove_self_loops, add_remaining_self_loops
 
 
 class RewireAttODEblock(ODEblock):
-  def __init__(self, odefunc, regularization_fns, opt, data, device, t=torch.tensor([0, 1]), gamma=0.5):
-    super(RewireAttODEblock, self).__init__(odefunc, regularization_fns, opt, data, device, t)
+  def __init__(self, odefunc, regularization_fns, opt, device, t=torch.tensor([0, 1]), gamma=0.5):
+    super(RewireAttODEblock, self).__init__(odefunc, regularization_fns, opt, device, t)
     assert opt['att_samp_pct'] > 0 and opt['att_samp_pct'] <= 1, "attention sampling threshold must be in (0,1]"
-    self.opt = opt
-    self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, data, device)
+    self.device = device
+    self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, device)
     # self.odefunc.edge_index, self.odefunc.edge_weight = data.edge_index, edge_weight=data.edge_attr
-    self.num_nodes = data.num_nodes
-    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=2,
-                                         fill_value=opt['self_loop_weight'],
-                                         num_nodes=data.num_nodes,
-                                         dtype=data.x.dtype)
-    self.data_edge_index = edge_index.to(device)
-    self.odefunc.edge_index = edge_index.to(device)  # this will be changed by attention scores
-    self.odefunc.edge_weight = edge_weight.to(device)
-    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
 
     if opt['adjoint']:
       from torchdiffeq import odeint_adjoint as odeint
@@ -37,6 +27,21 @@ class RewireAttODEblock(ODEblock):
       self.multihead_att_layer = SpGraphTransAttentionLayer(opt['hidden_dim'], opt['hidden_dim'], opt,
                                                           device, edge_weights=self.odefunc.edge_weight).to(device)
 
+  def reset_graph_data(self, data, dtype):
+    self.num_nodes = data.num_nodes
+    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=2,
+                                         fill_value=self.opt['self_loop_weight'],
+                                         num_nodes=data.num_nodes,
+                                         dtype=dtype)
+    if self.opt['self_loop_weight'] > 0:
+      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
+                                                         fill_value=self.opt['self_loop_weight'])
+    self.data_edge_index = edge_index.to(self.device)
+    self.odefunc.edge_index = edge_index.to(self.device)  # this will be changed by attention scores
+    self.odefunc.edge_weight = edge_weight.to(self.device)
+    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
+
+  
   def get_attention_weights(self, x):
     if self.opt['function'] not in {'GAT', 'transformer'}:
       attention, values = self.multihead_att_layer(x, self.data_edge_index)
@@ -203,15 +208,21 @@ class RewireAttODEblock(ODEblock):
 
     # threshold = torch.quantile(mean_att, 1 - self.opt['att_samp_pct'])
     mask = mean_att > threshold
-    self.odefunc.edge_index = self.data_edge_index[:, :, mask.T]
+    index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
+    index1 = torch.arange(2).unsqueeze(0).unsqueeze(2)
+    index2 = mask.unsqueeze(1)
+    mask = mask.transpose(0,1)
+    self.odefunc.edge_index = self.data_edge_index[index0, index1, index2]
     sampled_attention_weights = self.renormalise_attention(mean_att[mask])
     print('retaining {} of {} edges'.format(self.odefunc.edge_index.shape[2], self.data_edge_index.shape[2]))
-    self.data_edge_index = self.data_edge_index[:, :, mask.T]
+    self.data_edge_index = self.data_edge_index[index0, index1, index2]
     self.odefunc.edge_weight = sampled_attention_weights #rewiring structure so need to replace any preproc ew's with new ew's
     self.odefunc.attention_weights = sampled_attention_weights
 
-  def forward(self, x):
+  def forward(self, x, graph_data):
     t = self.t.type_as(x)
+    
+    self.reset_graph_data(graph_data, x.dtype)
 
     if self.training:
       with torch.no_grad():

@@ -100,6 +100,12 @@ def get_dataset(opt: dict, data_dir, use_lcc: bool = False) -> InMemoryDataset:
       dataset.data,
       num_development=5000 if ds == "CoauthorCS" else 1500)
 
+  
+  dataset.data.x = dataset.data.x.unsqueeze(0)
+  dataset.data.y = dataset.data.y.unsqueeze(0)
+  dataset.data.edge_index = dataset.data.edge_index.unsqueeze(0)
+  dataset.data.edge_index = dataset.data.edge_attr.unsqueeze(0)
+  
   return dataset
 
 

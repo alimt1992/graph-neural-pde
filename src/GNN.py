@@ -12,20 +12,20 @@ class GNN(BaseGNN):
     self.f = set_function(opt)
     block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
-    self.odeblock = block(self.f, self.regularization_fns, opt, dataset.data, device, t=time_tensor).to(device)
+    self.odeblock = block(self.f, self.regularization_fns, opt, device, t=time_tensor).to(device)
 
-  def forward(self, x, pos_encoding=None):
+  def forward(self, x, graph_data, pos_encoding=None):
     # Encode each node based on its feature.
     if self.opt['use_labels']:
-      y = x[:, -self.num_classes:]
-      x = x[:, :-self.num_classes]
+      y = x[:, :, -self.num_classes:]
+      x = x[:, :, :-self.num_classes]
 
     if self.opt['beltrami']:
       x = F.dropout(x, self.opt['input_dropout'], training=self.training)
       x = self.mx(x)
       p = F.dropout(pos_encoding, self.opt['input_dropout'], training=self.training)
       p = self.mp(p)
-      x = torch.cat([x, p], dim=1)
+      x = torch.cat([x, p], dim=-1)
     else:
       x = F.dropout(x, self.opt['input_dropout'], training=self.training)
       x = self.m1(x)
@@ -40,22 +40,22 @@ class GNN(BaseGNN):
       x = torch.cat([x, y], dim=-1)
 
     if self.opt['batch_norm']:
-      x = self.bn_in(x)
+      x = self.bn_in(x.transpose(1, 2)).transpose(1, 2)
 
     # Solve the initial value problem of the ODE.
     if self.opt['augment']:
       c_aux = torch.zeros(x.shape).to(self.device)
-      x = torch.cat([x, c_aux], dim=1)
+      x = torch.cat([x, c_aux], dim=-1)
 
     self.odeblock.set_x0(x)
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x)
+      z, self.reg_states = self.odeblock(x, graph_data)
     else:
-      z = self.odeblock(x)
+      z = self.odeblock(x, graph_data)
 
     if self.opt['augment']:
-      z = torch.split(z, x.shape[1] // 2, dim=1)[0]
+      z = torch.split(z, x.shape[2] // 2, dim=-1)[0]
 
     # Activation.
     z = F.relu(z)

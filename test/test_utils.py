@@ -32,18 +32,19 @@ def get_rw_numpy(arr, self_loops, norm_dim):
 
 class UtilsTests(unittest.TestCase):
   def setUp(self):
-    self.edge = tensor([[0, 2, 2, 1], [1, 0, 1, 2]])
-    self.x = tensor([[1., 2.], [3., 2.], [4., 5.]], dtype=torch.float)
-    self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
-    self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
-    self.edge1 = tensor([[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]])
-    self.x1 = torch.ones((3, 2), dtype=torch.float)
-    self.data = Data(x=self.x, edge_index=self.edge)
-
-    self.leakyrelu = nn.LeakyReLU(0.2)
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    with (torch.device(self.device)):
+      self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]])
+      self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
+      self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
+      self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
+      self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]])
+      self.x1 = torch.ones((1, 3, 2), dtype=torch.float)
+      self.data = Data(x=self.x, edge_index=self.edge)
+
+      self.leakyrelu = nn.LeakyReLU(0.2)
     opt = {'dataset': 'Cora', 'self_loop_weight': 0, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2,
-                'K': 10,
+                'K': 10, 'batch_size': 1, 'multi_modal': False,
                 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
                 'hidden_dim': 6, 'linear_attention': True, 'augment': False, 'adjoint': False,
                 'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
@@ -79,4 +80,6 @@ class UtilsTests(unittest.TestCase):
 if __name__ == '__main__':
   tests = UtilsTests()
   tests.setUp()
+  tests.test_gcn_norm_fill_val()
+  tests.self_loop_test()
   tests.test_get_rw_adj()

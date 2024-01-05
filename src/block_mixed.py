@@ -2,23 +2,16 @@ import torch
 from torch import nn
 from function_transformer_attention import SpGraphTransAttentionLayer
 from base_classes import ODEblock
-from utils import get_rw_adj
+from utils import get_rw_adj, add_remaining_self_loops
 
 
 class MixedODEblock(ODEblock):
-  def __init__(self, odefunc, regularization_fns, opt, data, device, t=torch.tensor([0, 1]), gamma=0.):
-    super(MixedODEblock, self).__init__(odefunc, regularization_fns, opt, data, device, t)
+  def __init__(self, odefunc, regularization_fns, opt, device, t=torch.tensor([0, 1]), gamma=0.):
+    super(MixedODEblock, self).__init__(odefunc, regularization_fns, opt, device, t)
 
+    self.device = device
     self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, data, device)
     # self.odefunc.edge_index, self.odefunc.edge_weight = data.edge_index, edge_weight=data.edge_attr
-    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
-                                         fill_value=opt['self_loop_weight'],
-                                         num_nodes=data.num_nodes,
-                                         dtype=data.x.dtype)
-    self.odefunc.edge_index = edge_index.to(device)
-    self.odefunc.edge_weight = edge_weight.to(device)
-    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
-
     if opt['adjoint']:
       from torchdiffeq import odeint_adjoint as odeint
     else:
@@ -31,6 +24,19 @@ class MixedODEblock(ODEblock):
     self.multihead_att_layer = SpGraphTransAttentionLayer(opt['hidden_dim'], opt['hidden_dim'], opt,
                                                           device).to(device)
 
+  def reset_graph_data(self, data, dtype):
+    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
+                                         fill_value=self.opt['self_loop_weight'],
+                                         num_nodes=data.num_nodes,
+                                         dtype=dtype)
+    if self.opt['self_loop_weight'] > 0:
+      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
+                                                         fill_value=self.opt['self_loop_weight'])
+    self.odefunc.edge_index = edge_index.to(self.device)
+    self.odefunc.edge_weight = edge_weight.to(self.device)
+    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
+
+  
   def get_attention_weights(self, x):
     attention, values = self.multihead_att_layer(x, self.odefunc.edge_index)
     return attention
@@ -38,11 +44,12 @@ class MixedODEblock(ODEblock):
   def get_mixed_attention(self, x):
     gamma = torch.sigmoid(self.gamma)
     attention = self.get_attention_weights(x)
-    mixed_attention = attention.mean(dim=1) * (1 - gamma) + self.odefunc.edge_weight * gamma
+    mixed_attention = attention.mean(dim=2) * (1 - gamma) + self.odefunc.edge_weight * gamma
     return mixed_attention
 
-  def forward(self, x):
+  def forward(self, x, graph_data):
     t = self.t.type_as(x)
+    self.reset_graph_data(graph_data, x.dtype)
     self.odefunc.attention_weights = self.get_mixed_attention(x)
     integrator = self.train_integrator if self.training else self.test_integrator
     if self.opt["adjoint"] and self.training:

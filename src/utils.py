@@ -7,7 +7,7 @@ import scipy
 from scipy.stats import sem
 import numpy as np
 from torch_scatter import scatter_add
-from torch_geometric.utils import add_remaining_self_loops
+# from torch_geometric.utils import add_remaining_self_loops
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.utils.convert import to_scipy_sparse_matrix
 from sklearn.preprocessing import normalize
@@ -18,18 +18,46 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 class MaxNFEException(Exception): pass
 
 
+def add_remaining_self_loops(edge_index, edge_attr, fill_value):
+  n = edge_index.shape[1]
+
+  index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
+  index1 = edge_index[:,0].flatten()
+  index2 = edge_index[:,1].flatten()
+  indices = torch.stack([index0, index1, index2] , dim=0)
+  weight_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
+                                            requires_grad=True).to_dense()
+  edge_weights = weight_mat
+  loop_weights = torch.eye(n)[None,:,:].expand(edge_index.shape[0], n, n) * fill_value
+  edge_weights = torch.sum(torch.cat((edge_weights[:,:,:,None], loop_weights[:,:,:,None]), dim=3), dim=3)
+  nonzero_mask = torch.zeros_like(edge_weights)
+  nonzero_mask[edge_weights != 0] = 1
+  nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
+  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(edge_index.shape[0], n*n, 2)
+  new_edges = new_edges * nonzero_mask
+  sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+  
+  index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
+  index1 = new_edges[:, 0, :]
+  index2 = new_edges[:, 1, :]
+  edge_index = new_edges
+  edge_attr = edge_weights[index0, index1, index2]
+
+  return edge_index, edge_attr
+
 def rms_norm(tensor):
   return tensor.pow(2).mean().sqrt()
 
 
 def make_norm(state):
   if isinstance(state, tuple):
-    state = state[0]
+    state = state[:, 0]
   state_size = state.numel()
 
   def norm(aug_state):
-    y = aug_state[1:1 + state_size]
-    adj_y = aug_state[1 + state_size:1 + 2 * state_size]
+    y = aug_state[:, 1:1 + state_size]
+    adj_y = aug_state[:, 1 + state_size:1 + 2 * state_size]
     return max(rms_norm(y), rms_norm(adj_y))
 
   return norm
@@ -56,7 +84,7 @@ def gcn_norm_fill_val(edge_index, edge_weight=None, fill_value=0., num_nodes=Non
   num_nodes = maybe_num_nodes(edge_index, num_nodes)
 
   if edge_weight is None:
-    edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
+    edge_weight = torch.ones((edge_index.size(0), edge_index.size(2),), dtype=dtype,
                              device=edge_index.device)
 
   if not int(fill_value) == 0:
@@ -65,8 +93,8 @@ def gcn_norm_fill_val(edge_index, edge_weight=None, fill_value=0., num_nodes=Non
     assert tmp_edge_weight is not None
     edge_weight = tmp_edge_weight
 
-  row, col = edge_index[0], edge_index[1]
-  deg = scatter_add(edge_weight, col, dim=0, dim_size=num_nodes)
+  row, col = edge_index[:, 0], edge_index[:, 1]
+  deg = scatter_add(edge_weight, col, dim=1, dim_size=num_nodes)
   deg_inv_sqrt = deg.pow_(-0.5)
   deg_inv_sqrt.masked_fill_(deg_inv_sqrt == float('inf'), 0)
   return edge_index, deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
@@ -98,7 +126,7 @@ def get_rw_adj_old(data, opt):
   else:
     edge_index, edge_weight = data.edge_index, data.edge_attr
   coo = to_scipy_sparse_matrix(edge_index, edge_weight)
-  normed_csc = normalize(coo, norm='l1', axis=0)
+  normed_csc = normalize(coo, norm='l1', axis=1)
   return coo2tensor(normed_csc.tocoo())
 
 
@@ -106,7 +134,7 @@ def get_rw_adj(edge_index, edge_weight=None, norm_dim=1, fill_value=0., num_node
   num_nodes = maybe_num_nodes(edge_index, num_nodes)
 
   if edge_weight is None:
-    edge_weight = torch.ones((edge_index.size(1),), dtype=dtype,
+    edge_weight = torch.ones((edge_index.size(0), edge_index.size(2),), dtype=dtype,
                              device=edge_index.device)
 
   if not fill_value == 0:
@@ -115,9 +143,9 @@ def get_rw_adj(edge_index, edge_weight=None, norm_dim=1, fill_value=0., num_node
     assert tmp_edge_weight is not None
     edge_weight = tmp_edge_weight
 
-  row, col = edge_index[0], edge_index[1]
+  row, col = edge_index[:, 0], edge_index[:, 1]
   indices = row if norm_dim == 0 else col
-  deg = scatter_add(edge_weight, indices, dim=0, dim_size=num_nodes)
+  deg = scatter_add(edge_weight, indices, dim=1, dim_size=num_nodes)
   deg_inv_sqrt = deg.pow_(-1)
   edge_weight = deg_inv_sqrt[indices] * edge_weight if norm_dim == 0 else edge_weight * deg_inv_sqrt[indices]
   return edge_index, edge_weight
@@ -158,12 +186,12 @@ def get_sem(vec):
   return retval
 
 
-def get_full_adjacency(num_nodes):
+def get_full_adjacency(batch_size, num_nodes):
   # what is the format of the edge index?
-  edge_index = torch.zeros((2, num_nodes ** 2),dtype=torch.long)
+  edge_index = torch.zeros((batch_size, 2, num_nodes ** 2),dtype=torch.long)
   for idx in range(num_nodes):
-    edge_index[0][idx * num_nodes: (idx + 1) * num_nodes] = idx
-    edge_index[1][idx * num_nodes: (idx + 1) * num_nodes] = torch.arange(0, num_nodes,dtype=torch.long)
+    edge_index[:, 0, idx * num_nodes: (idx + 1) * num_nodes] = idx
+    edge_index[:, 1, idx * num_nodes: (idx + 1) * num_nodes] = torch.arange(0, num_nodes,dtype=torch.long)[None, :].expand(batch_size, num_nodes)
   return edge_index
 
 

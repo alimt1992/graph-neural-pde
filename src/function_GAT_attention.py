@@ -3,7 +3,6 @@ from torch import nn
 import numpy as np
 from torch_geometric.utils import softmax
 import torch_sparse
-from torch_geometric.utils.loop import add_remaining_self_loops
 from data import get_dataset
 from utils import MaxNFEException
 from base_classes import ODEFunc
@@ -11,14 +10,8 @@ from base_classes import ODEFunc
 
 class ODEFuncAtt(ODEFunc):
 
-  def __init__(self, in_features, out_features, opt, data, device):
-    super(ODEFuncAtt, self).__init__(opt, data, device)
-
-    if opt['self_loop_weight'] > 0:
-      self.edge_index, self.edge_weight = add_remaining_self_loops(data.edge_index, data.edge_attr,
-                                                                   fill_value=opt['self_loop_weight'])
-    else:
-      self.edge_index, self.edge_weight = data.edge_index, data.edge_attr
+  def __init__(self, in_features, out_features, opt, device):
+    super(ODEFuncAtt, self).__init__(opt, device)
 
     self.multihead_att_layer = SpGraphAttentionLayer(in_features, out_features, opt,
                                                      device).to(device)
@@ -32,11 +25,6 @@ class ODEFuncAtt(ODEFunc):
 
   def multiply_attention(self, x, attention, wx):
     if self.opt['mix_features']:
-      # wx = torch.mean(torch.stack(
-      #   [torch_sparse.spmm(self.edge_index, attention[:, :, idx], wx.shape[1], wx.shape[1], wx) for idx in
-      #    range(self.opt['heads'])], dim=1),
-      #   dim=1)
-      # ax = torch.mm(wx, self.multihead_att_layer.Wout)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
@@ -47,10 +35,6 @@ class ODEFuncAtt(ODEFunc):
       wx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), wx.unsqueeze(1)), dim=1)
       ax = torch.matmul(wx, self.multihead_att_layer.Wout)
     else:
-      # ax = torch.mean(torch.stack(
-      #   [torch_sparse.spmm(self.edge_index, attention[:, :, idx], x.shape[1], x.shape[1], x) for idx in
-      #    range(self.opt['heads'])], dim=1),
-      #   dim=1)
       index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
       index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
@@ -159,5 +143,5 @@ if __name__ == '__main__':
          'add_source':False, 'alpha_dim': 'sc', 'beta_dim': 'vc', 'max_nfe':1000, 'mix_features': False}
   dataset = get_dataset(opt, '../data', False)
   t = 1
-  func = ODEFuncAtt(dataset.data.num_features, 6, opt, dataset.data, device)
+  func = ODEFuncAtt(dataset.data.num_features, 6, opt, device)
   out = func(t, dataset.data.x)

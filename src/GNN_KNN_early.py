@@ -20,11 +20,10 @@ class GNNKNNEarly(BaseGNN):
     self.f = set_function(opt)
     block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
-    self.odeblock = block(self.f, self.regularization_fns, opt, dataset.data, device, t=time_tensor).to(device)
+    self.odeblock = block(self.f, self.regularization_fns, opt, device, t=time_tensor).to(device)
     # overwrite the test integrator with this custom one
     with torch.no_grad():
       self.odeblock.test_integrator = EarlyStopInt(self.T, self.opt, self.device)
-      self.set_solver_data(dataset.data)
 
   def set_solver_m2(self):
     self.odeblock.test_integrator.m2_weight = self.m2.weight.data.detach().clone().to(self.device)
@@ -33,18 +32,18 @@ class GNNKNNEarly(BaseGNN):
   def set_solver_data(self, data):
     self.odeblock.test_integrator.data = data
 
-  def forward(self, x, pos_encoding):
+  def forward(self, x, graph_data, pos_encoding):
     # Encode each node based on its feature.
     if self.opt['use_labels']:
-      y = x[:, -self.num_classes:]
-      x = x[:, :-self.num_classes]
+      y = x[:, :, -self.num_classes:]
+      x = x[:, :, :-self.num_classes]
 
     if self.opt['beltrami']:
       x = F.dropout(x, self.opt['input_dropout'], training=self.training)
       x = self.mx(x)
       p = F.dropout(pos_encoding, self.opt['input_dropout'], training=self.training)
       p = self.mp(p)
-      x = torch.cat([x, p], dim=1)
+      x = torch.cat([x, p], dim=-1)
     else:
       x = F.dropout(x, self.opt['input_dropout'], training=self.training)
       x = self.m1(x)
@@ -58,12 +57,12 @@ class GNNKNNEarly(BaseGNN):
       x = torch.cat([x, y], dim=-1)
 
     if self.opt['batch_norm']:
-      x = self.bn_in(x)
+      x = self.bn_in(x.transpose(1, 2)).transpose(1, 2)
 
     # Solve the initial value problem of the ODE.
     if self.opt['augment']:
       c_aux = torch.zeros(x.shape).to(self.device)
-      x = torch.cat([x, c_aux], dim=1)
+      x = torch.cat([x, c_aux], dim=-1)
 
     self.odeblock.set_x0(x)
 
@@ -71,12 +70,12 @@ class GNNKNNEarly(BaseGNN):
       self.set_solver_m2()
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x)
+      z, self.reg_states = self.odeblock(x, graph_data)
     else:
-      z = self.odeblock(x)
+      z = self.odeblock(x, graph_data)
 
     if self.opt['augment']:
-      z = torch.split(z, x.shape[1] // 2, dim=1)[0]
+      z = torch.split(z, x.shape[2] // 2, dim=-1)[0]
 
     # Activation.
     z = F.relu(z)
@@ -94,13 +93,13 @@ class GNNKNNEarly(BaseGNN):
 
   def forward_encoder(self, x, pos_encoding):
     if self.opt['use_labels']:
-      y = x[:, -self.num_classes:]
-      x = x[:, :-self.num_classes]
+      y = x[:, :, -self.num_classes:]
+      x = x[:, :, :-self.num_classes]
 
     if self.opt['beltrami']:
       x = self.mx(x)
       p = self.mp(pos_encoding)
-      x = torch.cat([x, p], dim=1)
+      x = torch.cat([x, p], dim=-1)
     else:
       x = self.m1(x)
 
@@ -113,27 +112,27 @@ class GNNKNNEarly(BaseGNN):
       x = torch.cat([x, y], dim=-1)
 
     if self.opt['batch_norm']:
-      x = self.bn_in(x)
+      x = self.bn_in(x.transpose(1, 2)).transpose(1, 2)
 
     # Solve the initial value problem of the ODE.
     if self.opt['augment']:
       c_aux = torch.zeros(x.shape).to(self.device)
-      x = torch.cat([x, c_aux], dim=1)
+      x = torch.cat([x, c_aux], dim=-1)
 
     return x
 
-  def forward_ODE(self, x, pos_encoding):
+  def forward_ODE(self, x, graph_data, pos_encoding):
     x = self.forward_encoder(x, pos_encoding)
 
     self.odeblock.set_x0(x)
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x)
+      z, self.reg_states = self.odeblock(x, graph_data)
     else:
-      z = self.odeblock(x)
+      z = self.odeblock(x, graph_data)
 
     if self.opt['augment']:
-      z = torch.split(z, x.shape[1] // 2, dim=1)[0]
+      z = torch.split(z, x.shape[2] // 2, dim=-1)[0]
 
     return z
 
@@ -141,7 +140,8 @@ class GNNKNNEarly(BaseGNN):
 def main(opt):
   dataset = get_dataset(opt, '../data', False)
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model, data = GNNEarly(opt, dataset, device).to(device), dataset.data.to(device)
+  model, data = GNNKNNEarly(opt, dataset, device).to(device), dataset.data.to(device)
+  model.set_solver_data(dataset.data)
   print(opt)
   # todo for some reason the submodule parameters inside the attention module don't show up when running on GPU.
   parameters = [p for p in model.parameters() if p.requires_grad]

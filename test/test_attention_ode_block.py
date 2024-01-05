@@ -18,15 +18,16 @@ from test_params import OPT
 
 class AttentionODEBlockTests(unittest.TestCase):
   def setUp(self):
-    self.edge = tensor([[0, 2, 2, 1], [1, 0, 1, 2]])
-    self.x = tensor([[1., 2.], [3., 2.], [4., 5.]], dtype=torch.float)
-    self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
-    self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
-    self.edge1 = tensor([[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]])
-    self.x1 = torch.ones((3, 2), dtype=torch.float)
-
-    self.leakyrelu = nn.LeakyReLU(0.2)
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    with (torch.device(self.device)):
+      self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]])
+      self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
+      self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
+      self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
+      self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]])
+      self.x1 = torch.ones((1, 3, 2), dtype=torch.float)
+
+      self.leakyrelu = nn.LeakyReLU(0.2)
     self.opt = OPT
     self.dataset = get_dataset(self.opt, '../data', False)
 
@@ -42,10 +43,10 @@ class AttentionODEBlockTests(unittest.TestCase):
     self.assertTrue(isinstance(odeblock, AttODEblock))
     self.assertTrue(isinstance(odeblock.odefunc, LaplacianODEFunc))
     gnn.train()
-    out = odeblock(data.x)
+    out = odeblock(data.x, data)
     self.assertTrue(data.x.shape == out.shape)
     gnn.eval()
-    out = odeblock(data.x)
+    out = odeblock(data.x, data)
     print('ode block out', out)
     self.assertTrue(data.x.shape == out.shape)
     self.opt['heads'] = 2
@@ -59,12 +60,12 @@ class AttentionODEBlockTests(unittest.TestCase):
     self.opt['attention_dim']=32
     gnn = GNN(self.opt, self.dataset, device=self.device)
     gnn.train()
-    out = gnn(self.dataset.data.x)
+    out = gnn(self.dataset.data.x, self.dataset.data)
     print(out.shape)
     print(torch.Size([self.dataset.data.num_nodes, self.dataset.num_classes]))
     self.assertTrue(out.shape == torch.Size([self.dataset.data.num_nodes, self.dataset.num_classes]))
     gnn.eval()
-    out = gnn(self.dataset.data.x)
+    out = gnn(self.dataset.data.x, self.dataset.data)
     self.assertTrue(out.shape == torch.Size([self.dataset.data.num_nodes, self.dataset.num_classes]))
 
 
@@ -72,3 +73,4 @@ if __name__ == '__main__':
   est = AttentionODEBlockTests()
   est.setUp()
   est.test_block()
+  est.test_gnn()

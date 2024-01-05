@@ -45,7 +45,7 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
     self.best_time = 0
     self.batch_size = opt['batch_size']
     self.ode_test = self.test_OGB if opt['dataset'] == 'ogbn-arxiv' else self.test
-    self.dataset = opt['dataset']
+    self.opt = opt
     if opt['dataset'] == 'ogbn-arxiv':
       self.lf = torch.nn.functional.nll_loss
       self.evaluator = Evaluator(name=opt['dataset'])
@@ -58,13 +58,13 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
 
   def integrate(self, t):
     solution = torch.empty(t.shape, *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
-    solution[0] = self.y0
+    solution[:, 0] = self.y0
     t = t.to(self.dtype)
     self._before_integrate(t)
     new_t = t
-    for i in range(1, len(t[0])):
-      new_t, y = self.advance(t[:,i])
-      solution[i] = y
+    for i in range(1, len(t)):
+      new_t, y = self.advance(t[i])
+      solution[:, i] = y
     return new_t, solution
 
   def advance(self, next_t):
@@ -90,7 +90,8 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
   def test(self, logits):
     accs = []
     for _, mask in self.data('train_mask', 'val_mask', 'test_mask'):
-      pred = logits[mask].max(1)[1]
+      # pred = logits[mask].max(1)[1]
+      pred = logits[mask].max(2)[1]
       acc = pred.eq(self.data.y[mask]).sum().item() / mask.sum().item()
       accs.append(acc)
     return accs
@@ -107,12 +108,14 @@ class EarlyStopDopri5(RKAdaptiveStepsizeODESolver):
   def evaluate(self, rkstate):
     # Activation.
     z = rkstate.y1
-    if not self.m2_weight.shape[1] == z.shape[1]:  # system has been augmented
-      z = torch.split(z, self.m2_weight.shape[1], dim=1)[0]
+    # if not self.m2_weight.shape[1] == z.shape[1]:  # system has been augmented
+    #   z = torch.split(z, self.m2_weight.shape[1], dim=1)[0]
+    if not self.m2_weight.shape[2] == z.shape[2]:  # system has been augmented
+      z = torch.split(z, self.m2_weight.shape[2], dim=2)[0]
     z = F.relu(z)
     z = F.linear(z, self.m2_weight, self.m2_bias)
     t0, t1 = float(self.rk_state.t0), float(self.rk_state.t1)
-    if self.dataset == 'ogbn-arxiv':
+    if self.opt['dataset'] == 'ogbn-arxiv':
       z = z.log_softmax(dim=-1)
       loss = self.lf(z[self.data.train_mask], self.data.y.squeeze()[self.data.train_mask])
     else:
@@ -143,7 +146,7 @@ class EarlyStopRK4(FixedGridODESolver):
     self.best_test = 0
     self.best_time = 0
     self.ode_test = self.test_OGB if opt['dataset'] == 'ogbn-arxiv' else self.test
-    self.dataset = opt['dataset']
+    self.opt = opt
     if opt['dataset'] == 'ogbn-arxiv':
       self.lf = torch.nn.functional.nll_loss
       self.evaluator = Evaluator(name=opt['dataset'])
@@ -163,14 +166,15 @@ class EarlyStopRK4(FixedGridODESolver):
 
   def integrate(self, t):
     time_grid = self.grid_constructor(self.func, self.y0, t)
-    assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
+    # assert time_grid[0] == t[0] and time_grid[-1] == t[-1]
+    assert torch.all(time_grid[:, 0] == t[0]) and torch.all(time_grid[:, -1] == t[-1])
 
-    solution = torch.empty(len(t), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
-    solution[0] = self.y0
+    solution = torch.empty(len(t[0]), *self.y0.shape, dtype=self.y0.dtype, device=self.y0.device)
+    solution[:, 0] = self.y0
 
     j = 1
     y0 = self.y0
-    for t0, t1 in zip(time_grid[:-1], time_grid[1:]):
+    for t0, t1 in zip(time_grid[:, :-1], time_grid[:, 1:]):
       dy = self._step_func(self.func, t0, t1 - t0, t1, y0)
       y1 = y0 + dy
       train_acc, val_acc, test_acc = self.evaluate(y1, t0, t1)
@@ -188,7 +192,7 @@ class EarlyStopRK4(FixedGridODESolver):
   def test(self, logits):
     accs = []
     for _, mask in self.data('train_mask', 'val_mask', 'test_mask'):
-      pred = logits[mask].max(1)[1]
+      pred = logits[mask].max(2)[1]
       acc = pred.eq(self.data.y[mask]).sum().item() / mask.sum().item()
       accs.append(acc)
     return accs
@@ -204,11 +208,11 @@ class EarlyStopRK4(FixedGridODESolver):
   @torch.no_grad()
   def evaluate(self, z, t0, t1):
     # Activation.
-    if not self.m2_weight.shape[1] == z.shape[1]:  # system has been augmented
-      z = torch.split(z, self.m2_weight.shape[1], dim=1)[0]
+    if not self.m2_weight.shape[2] == z.shape[2]:  # system has been augmented
+      z = torch.split(z, self.m2_weight.shape[2], dim=2)[0]
     z = F.relu(z)
     z = F.linear(z, self.m2_weight, self.m2_bias)
-    if self.dataset == 'ogbn-arxiv':
+    if self.opt['dataset'] == 'ogbn-arxiv':
       z = z.log_softmax(dim=-1)
       loss = self.lf(z[self.data.train_mask], self.data.y.squeeze()[self.data.train_mask])
     else:

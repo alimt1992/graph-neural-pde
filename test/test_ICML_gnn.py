@@ -23,11 +23,13 @@ from test_params import OPT
 
 class ICMLGNNTests(unittest.TestCase):
   def setUp(self):
-    self.edge = tensor([[0, 2, 2], [1, 0, 1]])
-    self.x = tensor([[1., 2.], [3., 2.], [4., 5.]], dtype=float)
-    self.W = tensor([[2, 1], [3, 2]], dtype=float)
-    self.alpha = tensor([[1, 2, 3, 4]], dtype=float)
-    self.leakyrelu = nn.LeakyReLU(0.2)
+    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    with (torch.device(self.device)):
+      self.edge = tensor([[[0, 2, 2], [1, 0, 1]]])
+      self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=float)
+      self.W = tensor([[2, 1], [3, 2]], dtype=float)
+      self.alpha = tensor([[1, 2, 3, 4]], dtype=float)
+      self.leakyrelu = nn.LeakyReLU(0.2)
 
   def tearDown(self) -> None:
     pass

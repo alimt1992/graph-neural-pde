@@ -16,8 +16,8 @@ from utils import MaxNFEException
 class LaplacianODEFunc(ODEFunc):
 
   # currently requires in_features = out_features
-  def __init__(self, in_features, out_features, opt, data, device):
-    super(LaplacianODEFunc, self).__init__(opt, data, device)
+  def __init__(self, in_features, out_features, opt, device):
+    super(LaplacianODEFunc, self).__init__(opt, device)
 
     self.in_features = in_features
     self.out_features = out_features
@@ -42,17 +42,14 @@ class LaplacianODEFunc(ODEFunc):
     indices = torch.stack([index0, index1, index2] , dim=0)
     if self.opt['block'] in ['attention']:  # adj is a multihead attention
       mean_attention = self.attention_weights.mean(dim=2)
-      # ax = torch_sparse.spmm(self.edge_index, mean_attention, x.shape[1], x.shape[1], x)
       sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
                                            requires_grad=True).to(self.device)
       ax = torch.matmul(sparse_att.to_dense(), x)
     elif self.opt['block'] in ['mixed', 'hard_attention']:  # adj is a torch sparse matrix
-      # ax = torch_sparse.spmm(self.edge_index, self.attention_weights, x.shape[1], x.shape[1], x)
       sparse_att = torch.sparse_coo_tensor(indices, self.attention_weights.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
                                            requires_grad=True).to(self.device)
       ax = torch.matmul(sparse_att.to_dense(), x)
     else:  # adj is a torch sparse matrix
-      # ax = torch_sparse.spmm(self.edge_index, self.edge_weight, x.shape[1], x.shape[1], x)
       sparse_att = torch.sparse_coo_tensor(indices, self.edge_weight.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
                                            requires_grad=True).to(self.device)
       ax = torch.matmul(sparse_att.to_dense(), x)

@@ -22,14 +22,15 @@ from utils import ROOT_DIR
 class AttentionTests(unittest.TestCase):
   def setUp(self):
     self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]]).to(self.device)
-    self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float).to(self.device)
-    self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]]).to(self.device)
-    self.x1 = torch.ones((1, 3, 2), dtype=torch.float).to(self.device)
+    with (torch.device(self.device)):
+      self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]])
+      self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
+      self.edge1 = tensor([[[0, 0, 1, 1, 2, 2], [1, 2, 0, 2, 0, 1]]])
+      self.x1 = torch.ones((1, 3, 2), dtype=torch.float)
 
-    self.W = tensor([[2, 1], [3, 2]], dtype=torch.float).to(self.device)
-    self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float).to(self.device)
-    self.leakyrelu = nn.LeakyReLU(0.2).to(self.device)
+      self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
+      self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
+      self.leakyrelu = nn.LeakyReLU(0.2)
     opt = {'dataset': 'Citeseer', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2,
                 'K': 10,
                 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
@@ -55,51 +56,54 @@ class AttentionTests(unittest.TestCase):
     print(attention)
 
   def test_function(self):
-    in_features = self.x.shape[2]
-    out_features = self.x.shape[2]
-    att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
-    attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
-    self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
-    dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-    dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+    with (torch.device(self.device)):
+      in_features = self.x.shape[2]
+      out_features = self.x.shape[2]
+      att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
+      attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
+      self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
+      dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
 
-    def get_round_sum(tens, n_digits=3):
-      val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']) + 1)
-      round_sum = (val * 10 ** n_digits).round() / (10 ** n_digits)
-      print('round sum', round_sum)
-      return round_sum
+      def get_round_sum(tens, n_digits=3):
+        val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']) + 1)
+        round_sum = (val * 10 ** n_digits).round() / (10 ** n_digits)
+        print('round sum', round_sum)
+        return round_sum
 
-    self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention1), torch.ones(size=dense_attention1.shape))))
-    self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention2), torch.ones(size=dense_attention1.shape))))
-    self.assertTrue(torch.all(attention > 0.))
-    self.assertTrue(torch.all(attention <= 1.))
+      self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention1), torch.ones(size=dense_attention1.shape))))
+      self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention2), torch.ones(size=dense_attention1.shape))))
+      self.assertTrue(torch.all(attention > 0.))
+      self.assertTrue(torch.all(attention <= 1.))
 
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', True)
     data = dataset.data
     in_features = data.x.shape[2]
     out_features = data.x.shape[2]
 
-    att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
-    attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
-    self.assertTrue(attention.shape == (data.edge_index.shape[2], self.opt['heads']))
-    dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-    dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-    print('sums:', torch.sum(torch.isclose(dense_attention1, torch.ones(size=dense_attention1.shape))), dense_attention1.shape)
-    print('da1', dense_attention1)
-    print('da2', dense_attention2)
-    self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention1), torch.ones(size=dense_attention1.shape))))
-    self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention2), torch.ones(size=dense_attention2.shape))))
-    self.assertTrue(torch.all(attention > 0.))
-    self.assertTrue(torch.all(attention <= 1.))
+    with (torch.device(self.device)):
+      att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
+      attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
+      self.assertTrue(attention.shape == (1, data.edge_index.shape[2], self.opt['heads']))
+      dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      print('sums:', torch.sum(torch.isclose(dense_attention1, torch.ones(size=dense_attention1.shape))), dense_attention1.shape)
+      print('da1', dense_attention1)
+      print('da2', dense_attention2)
+      self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention1), torch.ones(size=dense_attention1.shape))))
+      self.assertTrue(torch.all(torch.isclose(get_round_sum(dense_attention2), torch.ones(size=dense_attention2.shape))))
+      self.assertTrue(torch.all(attention > 0.))
+      self.assertTrue(torch.all(attention <= 1.))
 
   def test_symmetric_attention(self):
-    in_features = self.x1.shape[2]
-    out_features = self.x1.shape[2]
-    att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
-    attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
+    with (torch.device(self.device)):
+      in_features = self.x1.shape[2]
+      out_features = self.x1.shape[2]
+      att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
+      attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
 
-    self.assertTrue(torch.all(torch.isclose(att_layer.Q.weight, att_layer.K.weight)))
-    self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
+      self.assertTrue(torch.all(torch.isclose(att_layer.Q.weight, att_layer.K.weight)))
+      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
 
   def test_module(self):
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', False)

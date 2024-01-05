@@ -30,13 +30,13 @@ def create_regularization_fns(args):
 
 
 class ODEblock(nn.Module):
-  def __init__(self, odefunc, regularization_fns, opt, data, device, t):
+  def __init__(self, odefunc, regularization_fns, opt, device, t):
     super(ODEblock, self).__init__()
     self.opt = opt
     self.t = t
     
     self.aug_dim = 2 if opt['augment'] else 1
-    self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, data, device)
+    self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, device)
     
     self.nreg = len(regularization_fns)
     self.reg_odefunc = RegularizedODEfunc(self.odefunc, regularization_fns)
@@ -77,7 +77,7 @@ class ODEblock(nn.Module):
 class ODEFunc(MessagePassing):
 
   # currently requires in_features = out_features
-  def __init__(self, opt, data, device):
+  def __init__(self, opt, device):
     super(ODEFunc, self).__init__()
     self.opt = opt
     self.device = device
@@ -120,6 +120,7 @@ class BaseGNN(MessagePassing):
     if opt['use_labels']:
       # todo - fastest way to propagate this everywhere, but error prone - refactor later
       opt['hidden_dim'] = opt['hidden_dim'] + dataset.num_classes
+      self.hidden_dim = opt['hidden_dim']
     else:
       self.hidden_dim = opt['hidden_dim']
     if opt['fc_out']:
