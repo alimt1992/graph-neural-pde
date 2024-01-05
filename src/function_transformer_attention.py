@@ -13,30 +13,32 @@ class ODEFuncTransformerAtt(ODEFunc):
   def __init__(self, in_features, out_features, opt, device):
     super(ODEFuncTransformerAtt, self).__init__(opt, device)
 
+    self.device = device
     self.multihead_att_layer = SpGraphTransAttentionLayer(in_features, out_features, opt,
                                                           device, edge_weights=self.edge_weight).to(device)
 
   def multiply_attention(self, x, attention, v=None):
     # todo would be nice if this was more efficient
-    if self.opt['mix_features']:
-      index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      indices = torch.stack([index0, index1, index2, index3] , dim=0)
-      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [v.shape[0], v.shape[1], v.shape[1], self.opt['heads']],
-                                           requires_grad=True).to(self.device)
-      vx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), v.permute(0,3,1,2)), dim=1)
-      ax = self.multihead_att_layer.Wout(vx)
-    else:
-      mean_attention = attention.mean(dim=2)
-      index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      indices = torch.stack([index0, index1, index2] , dim=0)
-      sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
-                                           requires_grad=True).to(self.device)
-      ax = torch.matmul(sparse_att.to_dense(), x)
+    with (torch.device(self.device)):
+      if self.opt['mix_features']:
+        index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        indices = torch.stack([index0, index1, index2, index3] , dim=0)
+        sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [v.shape[0], v.shape[1], v.shape[1], self.opt['heads']],
+                                             requires_grad=True).to(self.device)
+        vx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), v.permute(0,3,1,2)), dim=1)
+        ax = self.multihead_att_layer.Wout(vx)
+      else:
+        mean_attention = attention.mean(dim=2)
+        index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+        index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+        index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+        indices = torch.stack([index0, index1, index2] , dim=0)
+        sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                             requires_grad=True).to(self.device)
+        ax = torch.matmul(sparse_att.to_dense(), x)
     return ax
 
   def forward(self, t, x, y=None):  # t is needed when called by the integrator

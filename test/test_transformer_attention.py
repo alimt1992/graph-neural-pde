@@ -80,6 +80,7 @@ class AttentionTests(unittest.TestCase):
     data = dataset.data
     in_features = data.x.shape[2]
     out_features = data.x.shape[2]
+    data.x, data.edge_index = data.x.to(self.device), data.edge_index.to(self.device)
 
     with (torch.device(self.device)):
       att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
@@ -109,9 +110,9 @@ class AttentionTests(unittest.TestCase):
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', False)
     t = 1
     out_dim = 6
-    func = ODEFuncTransformerAtt(dataset.data.num_features, out_dim, self.opt, dataset.data, self.device)
+    func = ODEFuncTransformerAtt(dataset.data.num_features, out_dim, self.opt, self.device)
+    func.edge_index = dataset.data.edge_index.to(self.device)
     out = func(t, dataset.data.x.to(self.device))
-    print(out.shape)
     self.assertTrue(out.shape == (dataset.data.num_nodes, dataset.num_features))
 
   def test_head_aggregation(self):
