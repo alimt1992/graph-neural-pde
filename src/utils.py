@@ -7,7 +7,6 @@ import scipy
 from scipy.stats import sem
 import numpy as np
 from torch_scatter import scatter_add
-# from torch_geometric.utils import add_remaining_self_loops
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.utils.convert import to_scipy_sparse_matrix
 from sklearn.preprocessing import normalize
@@ -45,6 +44,10 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value):
   edge_attr = edge_weights[index0, index1, index2]
 
   return edge_index, edge_attr
+
+def remove_self_loops(edge_index, edge_attr):
+  pass
+
 
 def rms_norm(tensor):
   return tensor.pow(2).mean().sqrt()

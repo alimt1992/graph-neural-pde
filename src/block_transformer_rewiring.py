@@ -4,7 +4,7 @@ from base_classes import ODEblock
 from torch_scatter import scatter
 import numpy as np
 import torch_sparse
-from utils import get_rw_adj, remove_self_loops, add_remaining_self_loops
+from utils import get_rw_adj, add_remaining_self_loops
 
 
 class RewireAttODEblock(ODEblock):
@@ -56,16 +56,12 @@ class RewireAttODEblock(ODEblock):
 
 
   def add_random_edges(self):
-    # M = self.opt["M_nodes"]
-    # M = int(self.num_nodes * (1/(1 - (1 - self.opt['att_samp_pct'])) - 1))
     M = int(self.num_nodes * (1/(1 - (self.opt['rw_addD'])) - 1))
     n = self.num_nodes
 
     with torch.no_grad():
       new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
-      #todo check if should be using coalesce insted of unique
-      #eg https://pytorch-geometric.readthedocs.io/en/latest/_modules/torch_geometric/transforms/two_hop.html#TwoHop
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
       index0 = torch.arange(cat.shape[0])[:, None].expand(cat.shape[0], cat.shape[2]).flatten()
       index1 = cat[:,0].flatten()
