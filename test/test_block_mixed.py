@@ -40,11 +40,12 @@ class MixedODEBlockTests(unittest.TestCase):
 
       self.leakyrelu = nn.LeakyReLU(0.2)
     opt = {'dataset': 'Cora', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'beta_dim': 'sc', 'heads': 2,
-                'K': 10, 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc',
-                'hidden_dim': 6, 'block': 'mixed', 'function': 'laplacian', 'augment': False, 'adjoint': False,
-                'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
-                'rewiring': None, 'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None, 'batch_size': 1, 'multi_modal': False,
-                'total_deriv': None, 'directional_penalty': None, 'jacobian_norm2': None, 'step_size':1, 'max_iter': 10, 'beltrami': False}
+           'K': 10, 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc',
+           'hidden_dim': 6, 'block': 'mixed', 'function': 'laplacian', 'augment': False, 'adjoint': False,
+           'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
+           'rewiring': None, 'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None,
+           'batch_size': 1, 'multi_modal': False, 'total_deriv': None, 'directional_penalty': None,
+           'jacobian_norm2': None, 'step_size':1, 'max_iter': 10, 'beltrami': False}
     self.opt = {**OPT, **opt}
 
     self.dataset = get_dataset(self.opt, '../data', False)

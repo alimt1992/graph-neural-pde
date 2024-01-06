@@ -31,13 +31,13 @@ class AttentionTests(unittest.TestCase):
       self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
       self.alpha = tensor([[1, 2, 3, 4]], dtype=torch.float)
       self.leakyrelu = nn.LeakyReLU(0.2)
-    opt = {'dataset': 'Citeseer', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2,
-                'K': 10,
-                'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
-                'hidden_dim': 6, 'linear_attention': True, 'augment': False, 'adjoint': False,
-                'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
-                'mixed_block': True, 'max_nfe': 1000, 'mix_features': False, 'attention_dim': 32, 'rewiring': None, 'batch_size': 1, 'multi_modal': False,
-                'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None, 'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
+    opt = {'dataset': 'Citeseer', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2, 'K': 10,
+           'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
+           'hidden_dim': 6, 'linear_attention': True, 'augment': False, 'adjoint': False, 'tol_scale': 1, 'time': 1,
+           'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler', 'mixed_block': True, 'max_nfe': 1000,
+           'mix_features': False, 'attention_dim': 32, 'rewiring': None, 'batch_size': 1, 'multi_modal': False,
+           'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None, 'jacobian_norm2': None,
+           'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
     self.opt = {**OPT, **opt}
   def tearDown(self) -> None:
     pass
@@ -123,12 +123,6 @@ class AttentionTests(unittest.TestCase):
       self.opt['head'] = 4
       att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(self.x, self.edge)
-  
-      # ax1 = torch.mean(torch.stack(
-      #     [torch_sparse.spmm(self.edge, attention[:, :, idx], self.x.shape[1], self.x.shape[1], self.x) for idx in
-      #      range(self.opt['heads'])], dim=1), dim=1)
-      # mean_attention = attention.mean(dim=2)
-      # ax2 = torch_sparse.spmm(self.edge, mean_attention, self.x.shape[1], self.x.shape[1], self.x)
   
       index0 = torch.arange(self.edge.shape[0])[:, None, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()
       index1 = self.edge[:,0][:, :, None].expand(self.edge.shape[0], self.edge.shape[2], self.opt['heads']).flatten()

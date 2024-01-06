@@ -43,13 +43,12 @@ class UtilsTests(unittest.TestCase):
       self.data = Data(x=self.x, edge_index=self.edge)
 
       self.leakyrelu = nn.LeakyReLU(0.2)
-    opt = {'dataset': 'Cora', 'self_loop_weight': 0, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2,
-                'K': 10, 'batch_size': 1, 'multi_modal': False,
-                'attention_norm_idx': 0, 'add_source': False, 'alpha': 1, 'alpha_dim': 'vc', 'beta_dim': 'vc',
-                'hidden_dim': 6, 'linear_attention': True, 'augment': False, 'adjoint': False,
-                'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
-                'rewiring': None, 'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None,
-                'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
+    opt = {'dataset': 'Cora', 'self_loop_weight': 0, 'leaky_relu_slope': 0.2, 'beta_dim': 'vc', 'heads': 2, 'K': 10,
+           'batch_size': 1, 'multi_modal': False, 'attention_norm_idx': 0, 'add_source': False, 'alpha': 1,
+           'alpha_dim': 'vc', 'beta_dim': 'vc', 'hidden_dim': 6, 'linear_attention': True, 'augment': False, 'adjoint': False,
+           'tol_scale': 1, 'time': 1, 'ode': 'ode', 'input_dropout': 0.5, 'dropout': 0.5, 'method': 'euler',
+           'rewiring': None, 'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None,
+           'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
     self.opt = {**OPT, **opt}
     self.dataset = get_dataset(self.opt, '../data', False)
 

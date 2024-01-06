@@ -17,7 +17,7 @@ class RegularizedODEfunc(nn.Module):
   def forward(self, t, state):
 
     with torch.enable_grad():
-      x = state[0]
+      x = state[:, 0]
       x.requires_grad_(True)
       t.requires_grad_(True)
       dstate = self.odefunc(t, x)
@@ -39,7 +39,7 @@ def total_derivative(x, t, dx, unused_context):
   directional_dx = torch.autograd.grad(dx, x, dx, create_graph=True)[0]
 
   try:
-    u = torch.full_like(dx, 1 / x.numel(), requires_grad=True)
+    u = torch.full_like(dx, 1 / x[0].numel(), requires_grad=True)
     tmp = torch.autograd.grad((u * dx).sum(), t, create_graph=True)[0]
     partial_dt = torch.autograd.grad(tmp.sum(), u, create_graph=True)[0]
 
@@ -49,7 +49,7 @@ def total_derivative(x, t, dx, unused_context):
       raise RuntimeError(
         'No partial derivative with respect to time. Use mathematically equivalent "directional_derivative" regularizer instead')
 
-  tdv2 = total_deriv.pow(2).view(x.size(0), -1)
+  tdv2 = total_deriv.pow(2).view(x.size(0), x.size(1), -1)
 
   return 0.5 * tdv2.mean(dim=-1)
 
@@ -58,21 +58,21 @@ def directional_derivative(x, t, dx, unused_context):
   del t, unused_context
 
   directional_dx = torch.autograd.grad(dx, x, dx, create_graph=True)[0]
-  ddx2 = directional_dx.pow(2).view(x.size(0), -1)
+  ddx2 = directional_dx.pow(2).view(x.size(0), x.size(1) -1)
 
   return 0.5 * ddx2.mean(dim=-1)
 
 
 def quadratic_cost(x, t, dx, unused_context):
   del x, t, unused_context
-  dx = dx.view(dx.shape[0], -1)
+  dx = dx.view(dx.shape[0], dx.shape[1], -1)
   return 0.5 * dx.pow(2).mean(dim=-1)
 
 
 def divergence_bf(dx, x):
   sum_diag = 0.
-  for i in range(x.shape[1]):
-      sum_diag += torch.autograd.grad(dx[:, i].sum(), x, create_graph=True)[0].contiguous()[:, i].contiguous()
+  for i in range(x.shape[2]):
+      sum_diag += torch.autograd.grad(dx[:, :, i].sum(), x, create_graph=True)[0].contiguous()[:, :, i].contiguous()
   return sum_diag.contiguous()
 
 

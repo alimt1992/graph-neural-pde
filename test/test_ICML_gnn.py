@@ -35,8 +35,9 @@ class ICMLGNNTests(unittest.TestCase):
     pass
 
   def test_fill_norm(self):
-    opt = {'dataset': 'Cora', 'improved': False, 'self_loop_weight': 1., 'rewiring': None, 'no_alpha_sigmoid': False,
-           'reweight_attention': False, 'kinetic_energy': None, 'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
+    opt = {'dataset': 'Cora', 'improved': False, 'self_loop_weight': 1., 'rewiring': None,
+           'no_alpha_sigmoid': False, 'reweight_attention': False, 'kinetic_energy': None,
+           'jacobian_norm2': None, 'total_deriv': None, 'directional_penalty': None, 'beltrami': False}
     opt = {**OPT, **opt}
     dataset = get_dataset(opt, '../data', False)
     data = dataset.data

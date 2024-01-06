@@ -3,6 +3,8 @@ import argparse
 import torch
 import numpy as np
 import torchvision
+import pandas as pd
+from torch.utils.data import Dataset
 from torch_geometric.data import Data, InMemoryDataset, download_url, DataLoader
 from torch_geometric.utils import dense_to_sparse
 import networkx as nx
@@ -69,7 +71,10 @@ def get_image_opt(opt):
   return opt
 
 
-def edge_index_calc(im_height, im_width, im_chan, diags = False):
+def object_edge_index_calc():
+    pass
+
+def grid_edge_index_calc(im_height, im_width, im_chan, diags = False):
     edge_list = []
     def oneD():
         for i in range(im_height * im_width):
@@ -137,19 +142,6 @@ def edge_index_calc(im_height, im_width, im_chan, diags = False):
 
     edge_list = oneD()
     ret_edge_tensor = torch.tensor(edge_list).T
-
-    #this is wrong need to put colour channels as featurs not extra nodes, saving code in case come back to
-    # if im_chan == 1:
-    #     edge_list = oneD()
-    #     ret_edge_tensor = torch.tensor(edge_list).T
-    # else:
-    #     edge_list = oneD()
-    #     edge_tensor = torch.tensor(edge_list).T
-    #     edge_list_3D = []
-    #     for i in range(im_chan):
-    #         chan_edge_tensor = edge_tensor + i * im_height * im_width
-    #         edge_list_3D.append(chan_edge_tensor)
-    #     ret_edge_tensor = torch.cat(edge_list_3D,dim=1)
     if diags:
         assert ret_edge_tensor.shape[1] == (8*(im_width-2)*(im_height-2)\
                                     + 2*5*(im_width-2) + 2*5*(im_height-2)\
@@ -232,7 +224,7 @@ def load_data(opt):
   train_loader = torch.utils.data.DataLoader(data_train, batch_size=1, shuffle=True)
   test_loader = torch.utils.data.DataLoader(data_test, batch_size=1, shuffle=True)
 
-  edge_index = edge_index_calc(im_height, im_width, im_chan, diags=opt['diags'])
+  edge_index = grid_edge_index_calc(im_height, im_width, im_chan, diags=opt['diags'])
   print("creating in_memory_datasets")
   if opt['testing_code'] == True:
       Graph_GNN = create_in_memory_dataset(opt, "GNN", train_loader, edge_index, im_height, im_width, im_chan,
@@ -355,6 +347,32 @@ def load_Superpix75Mat(opt): #, path='../data/SuperMNIST/MNIST/datasets/mnist_su
 
     return Graph_GNN, Graph_train, Graph_test
 
+
+
+class MultiModalGraphDataset(Dataset):
+    def __init__(self, annotations_file, data_dir, modality_transforms=None, target_transform=None, num_modalities=None):
+        self.labels = pd.read_csv(annotations_file)
+        self.data_dir = data_dir
+        self.num_modalities = num_modalities
+        self.modality_transforms = modality_transforms
+        self.target_transform = target_transform
+
+    def __len__(self):
+        return len(self.labels)
+
+class CLEVR(MultiModalGraphDataset):
+    def __init__(self, annotations_file, data_dir, modality_transforms=None, target_transform=None, num_modalities=None):
+        super(CLEVR, self).__init__(annotations_file, data_dir, modality_transforms, target_transform, num_modalities)
+
+    def __getitem__(self, idx):
+        data_path = os.path.join(self.img_dir, self.labels.iloc[idx, 0])
+        image = read_image(data_path)
+        label = self.labels.iloc[idx, 1]
+        if self.transform:
+            image = self.transform(image)
+        if self.target_transform:
+            label = self.target_transform(label)
+        return image, label
 
 def imshow(img):
     img = img / 2 + 0.5     # unnormalize
