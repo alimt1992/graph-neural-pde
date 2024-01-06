@@ -113,6 +113,7 @@ class AttentionTests(unittest.TestCase):
     func = ODEFuncTransformerAtt(dataset.data.num_features, out_dim, self.opt, self.device)
     func.edge_index = dataset.data.edge_index.to(self.device)
     out = func(t, dataset.data.x.to(self.device))
+    print(out.shape)
     self.assertTrue(out.shape == dataset.data.x.shape)
 
   def test_head_aggregation(self):
@@ -169,8 +170,8 @@ class AttentionTests(unittest.TestCase):
         edge_dict[src] = set([int(edge[0, 1, idx])])
 
     print(f"edge shape {edge.shape}")
-    src_test = edge[0, :, edge[0, 0, :] == 1][0, 1, :]
-    dst_test = edge[0, :, edge[0, 1, :] == 1][0, 0, :]
+    src_test = edge[0, :, edge[0, 0, :] == 1][1, :]
+    dst_test = edge[0, :, edge[0, 1, :] == 1][0, :]
     print('dst where src = 1', src_test)
     print('src where dst = 1', dst_test)
 

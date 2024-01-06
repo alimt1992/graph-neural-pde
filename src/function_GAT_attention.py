@@ -13,6 +13,7 @@ class ODEFuncAtt(ODEFunc):
   def __init__(self, in_features, out_features, opt, device):
     super(ODEFuncAtt, self).__init__(opt, device)
 
+    self.device = device
     self.multihead_att_layer = SpGraphAttentionLayer(in_features, out_features, opt,
                                                      device).to(device)
     try:
@@ -24,25 +25,26 @@ class ODEFuncAtt(ODEFunc):
     self.d_k = self.attention_dim // opt['heads']
 
   def multiply_attention(self, x, attention, wx):
-    if self.opt['mix_features']:
-      index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      indices = torch.stack([index0, index1, index2, index3] , dim=0)
-      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [wx.shape[0], wx.shape[1], wx.shape[1], self.opt['heads']],
-                                           requires_grad=True).to(self.device)
-      wx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), wx.unsqueeze(1)), dim=1)
-      ax = torch.matmul(wx, self.multihead_att_layer.Wout)
-    else:
-      index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-      indices = torch.stack([index0, index1, index2, index3] , dim=0)
-      sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [x.shape[0], x.shape[1], x.shape[1], self.opt['heads']],
-                                           requires_grad=True).to(self.device)
-      ax = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), x.unsqueeze(1)), dim=1)
+    with (torch.device(self.device)):
+      if self.opt['mix_features']:
+        index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        indices = torch.stack([index0, index1, index2, index3] , dim=0)
+        sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [wx.shape[0], wx.shape[1], wx.shape[1], self.opt['heads']],
+                                             requires_grad=True).to(self.device)
+        wx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), wx.unsqueeze(1)), dim=1)
+        ax = torch.matmul(wx, self.multihead_att_layer.Wout)
+      else:
+        index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        indices = torch.stack([index0, index1, index2, index3] , dim=0)
+        sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [x.shape[0], x.shape[1], x.shape[1], self.opt['heads']],
+                                             requires_grad=True).to(self.device)
+        ax = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), x.unsqueeze(1)), dim=1)
     return ax
 
   def forward(self, t, x, y=None):  # t is needed when called by the integrator
@@ -127,8 +129,9 @@ class SpGraphAttentionLayer(nn.Module):
     index0 = torch.arange(h.shape[0]).unsqueeze(1).unsqueeze(2).unsqueeze(3)
     index2 = torch.arange(h.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
     index3 = torch.arange(h.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3], h[:, edge[:, 1, :].unsqueeze(2).unsqueeze(2), index2, index3]), dim=1).transpose(1, 2).to(
-      self.device)  # edge: 2*D x E
+    edge_h = torch.cat((h[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(3), index2, index3],
+                        h[index0, edge[:, 1, :].unsqueeze(2).unsqueeze(3), index2, index3]),
+                        dim=2).transpose(1, 2).to(self.device)  # edge: 2*D x E
     edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
     attention = torch.stack([softmax(edge_e[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(edge_e.shape[0])], dim=0)###
     return attention, wx

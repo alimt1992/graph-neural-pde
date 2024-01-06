@@ -21,8 +21,8 @@ from test_params import OPT
 
 class AttentionTests(unittest.TestCase):
   def setUp(self):
+    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     with (torch.device(self.device)):
-      self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
       self.edge = tensor([[[0, 2, 2, 1], [1, 0, 1, 2]]])
       self.x = tensor([[[1., 2.], [3., 2.], [4., 5.]]], dtype=torch.float)
       self.W = tensor([[2, 1], [3, 2]], dtype=torch.float)
@@ -79,11 +79,12 @@ class AttentionTests(unittest.TestCase):
     data = dataset.data
     in_features = data.x.shape[2]
     out_features = data.x.shape[2]
+    data.x, data.edge_index = data.x.to(self.device), data.edge_index.to(self.device)
 
     with (torch.device(self.device)):
       att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
-  
+
       self.assertTrue(attention.shape == (data.edge_index.shape[0], data.edge_index.shape[2], self.opt['heads']))
       dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
       dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
@@ -92,22 +93,24 @@ class AttentionTests(unittest.TestCase):
       self.assertTrue(torch.all(attention > 0.))
       self.assertTrue(torch.all(attention <= 1.))
 
-  def test_symetric_attention(self):
-    in_features = self.x1.shape[2]
-    out_features = self.x1.shape[2]
-    att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
-    attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
+  def test_symmetric_attention(self):
+    with (torch.device(self.device)):
+      in_features = self.x1.shape[2]
+      out_features = self.x1.shape[2]
+      att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
+      attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
 
-    self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
+      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
 
   def test_module(self):
     dataset = get_dataset(self.opt, '../data', False)
     t = 1
     out_dim = 6
-    func = ODEFuncAtt(dataset.data.num_features, out_dim, self.opt, dataset.data, self.device)
+    func = ODEFuncAtt(dataset.data.num_features, out_dim, self.opt, self.device)
+    func.edge_index = dataset.data.edge_index.to(self.device)
     out = func(t, dataset.data.x.to(self.device))
     print(out.shape)
-    self.assertTrue(out.shape == (dataset.data.num_nodes, dataset.num_features))
+    self.assertTrue(out.shape == dataset.data.x.shape)
 
 
 if __name__ == '__main__':

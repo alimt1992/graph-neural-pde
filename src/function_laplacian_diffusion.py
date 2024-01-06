@@ -19,6 +19,7 @@ class LaplacianODEFunc(ODEFunc):
   def __init__(self, in_features, out_features, opt, device):
     super(LaplacianODEFunc, self).__init__(opt, device)
 
+    self.device = device
     self.in_features = in_features
     self.out_features = out_features
     self.w = nn.Parameter(torch.eye(opt['hidden_dim']))
@@ -36,23 +37,24 @@ class LaplacianODEFunc(ODEFunc):
       self.init_weights(self.K2)
 
   def sparse_multiply(self, x):
-    index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-    index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-    index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-    indices = torch.stack([index0, index1, index2] , dim=0)
-    if self.opt['block'] in ['attention']:  # adj is a multihead attention
-      mean_attention = self.attention_weights.mean(dim=2)
-      sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
-                                           requires_grad=True).to(self.device)
-      ax = torch.matmul(sparse_att.to_dense(), x)
-    elif self.opt['block'] in ['mixed', 'hard_attention']:  # adj is a torch sparse matrix
-      sparse_att = torch.sparse_coo_tensor(indices, self.attention_weights.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
-                                           requires_grad=True).to(self.device)
-      ax = torch.matmul(sparse_att.to_dense(), x)
-    else:  # adj is a torch sparse matrix
-      sparse_att = torch.sparse_coo_tensor(indices, self.edge_weight.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
-                                           requires_grad=True).to(self.device)
-      ax = torch.matmul(sparse_att.to_dense(), x)
+    with (torch.device(self.device)):
+      index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      indices = torch.stack([index0, index1, index2] , dim=0)
+      if self.opt['block'] in ['attention']:  # adj is a multihead attention
+        mean_attention = self.attention_weights.mean(dim=2)
+        sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                             requires_grad=True).to(self.device)
+        ax = torch.matmul(sparse_att.to_dense(), x)
+      elif self.opt['block'] in ['mixed', 'hard_attention']:  # adj is a torch sparse matrix
+        sparse_att = torch.sparse_coo_tensor(indices, self.attention_weights.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                             requires_grad=True).to(self.device)
+        ax = torch.matmul(sparse_att.to_dense(), x)
+      else:  # adj is a torch sparse matrix
+        sparse_att = torch.sparse_coo_tensor(indices, self.edge_weight.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
+                                             requires_grad=True).to(self.device)
+        ax = torch.matmul(sparse_att.to_dense(), x)
     return ax
 
   def forward(self, t, x, y=None):  # the t param is needed by the ODE solver.
