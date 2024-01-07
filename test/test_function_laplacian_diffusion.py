@@ -87,15 +87,15 @@ class FunctionLaplacianDiffusionTests(unittest.TestCase):
     data = self.dataset.data
     self.opt['hidden_dim'] = self.dataset.num_features
     self.opt['heads'] = 1
-    gnn = GNN(self.opt, self.dataset, device=self.device)
+    gnn = GNN(self.opt, self.dataset.num_classes, self.dataset.num_features, device=self.device)
     odeblock = gnn.odeblock
     self.assertTrue(isinstance(odeblock, ConstantODEblock))
     self.assertTrue(isinstance(odeblock.odefunc, LaplacianODEFunc))
     gnn.train()
-    out = odeblock(data.x)
+    out = odeblock(data.x, data)
     self.assertTrue(data.x.shape == out.shape)
     gnn.eval()
-    out = odeblock(data.x)
+    out = odeblock(data.x, data)
     self.assertTrue(data.x.shape == out.shape)
 
 
