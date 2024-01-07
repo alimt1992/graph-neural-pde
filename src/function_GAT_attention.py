@@ -134,7 +134,7 @@ class SpGraphAttentionLayer(nn.Module):
                         dim=2).transpose(1, 2).to(self.device)  # edge: 2*D x E
     edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
     # attention = torch.stack([softmax(edge_e[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(edge_e.shape[0])], dim=0)###
-    attention = softmax(edge_e, edge[:, self.opt['attention_norm_idx'],:])
+    attention = torch.softmax(edge_e, dim=1)
     return attention, wx
 
   def __repr__(self):

@@ -52,7 +52,7 @@ class AttentionTests(unittest.TestCase):
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
     # attention = softmax(edge_e[0], self.edge[0,1])
-    attention = softmax(edge_e, self.edge[:,1])
+    attention = torch.softmax(edge_e, dim=1)
     print(attention)
 
   def test_function(self):

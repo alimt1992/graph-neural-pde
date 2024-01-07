@@ -264,7 +264,7 @@ class SpGraphTransAttentionLayer(nn.Module):
       attention = torch.stack([squareplus(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
     else:
       # attention = torch.stack([softmax(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
-      attention = softmax(prods, edge[:, self.opt['attention_norm_idx'],:])
+      attention = torch.softmax(prods, dim=1)
     return attention, (v, prods)
 
   def __repr__(self):
