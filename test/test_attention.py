@@ -14,7 +14,8 @@ from torch import tensor
 from torch import nn
 
 from function_GAT_attention import SpGraphAttentionLayer, ODEFuncAtt
-from torch_geometric.utils import softmax, to_dense_adj
+from torch_geometric.utils import softmax#, to_dense_adj
+from utils import to_dense_adj
 from data import get_dataset
 from test_params import OPT
 
@@ -65,8 +66,8 @@ class AttentionTests(unittest.TestCase):
       att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
       self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
-      dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-      dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention1 = to_dense_adj(self.edge, edge_attr=attention[:, :, 0])
+      dense_attention2 = to_dense_adj(self.edge, edge_attr=attention[:, :, 1])
 
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention1), 1.)))
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention2), 1.)))
@@ -85,8 +86,8 @@ class AttentionTests(unittest.TestCase):
       attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
 
       self.assertTrue(attention.shape == (data.edge_index.shape[0], data.edge_index.shape[2], self.opt['heads']))
-      dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-      dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 0])
+      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention1), 1.)))
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention2), 1.)))
       self.assertTrue(torch.all(attention > 0.))

@@ -10,15 +10,15 @@ from torch_scatter import scatter_add
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.utils.convert import to_scipy_sparse_matrix
 from sklearn.preprocessing import normalize
-from torch_geometric.nn.conv.gcn_conv import gcn_norm
+# from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
 class MaxNFEException(Exception): pass
 
 
-def add_remaining_self_loops(edge_index, edge_attr, fill_value):
-  n = edge_index.shape[1]
+def add_remaining_self_loops(edge_index, edge_attr, fill_value, num_nodes):
+  n = num_nodes
 
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
   index1 = edge_index[:,0].flatten()
@@ -35,7 +35,7 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value):
   new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(edge_index.shape[0], n*n, 2)
   new_edges = new_edges * nonzero_mask
   sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2).long()
   
   index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
   index1 = new_edges[:, 0, :]
@@ -47,6 +47,16 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value):
 
 def remove_self_loops(edge_index, edge_attr):
   pass
+
+def to_dense_adj(edge_index, edge_weight):
+  n = maybe_num_nodes(edge_index, n)
+  index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
+  index1 = edge_index[:,0].flatten()
+  index2 = edge_index[:,1].flatten()
+  indices = torch.stack([index0, index1, index2] , dim=0)
+  weight_mat = torch.sparse_coo_tensor(indices, edge_weight.flatten(), [edge_index.shape[0], n, n],
+                                            requires_grad=True).to_dense()
+  return weight_mat
 
 
 def rms_norm(tensor):
@@ -103,34 +113,34 @@ def gcn_norm_fill_val(edge_index, edge_weight=None, fill_value=0., num_nodes=Non
   return edge_index, deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
 
 
-def coo2tensor(coo, device=None):
-  indices = np.vstack((coo.row, coo.col))
-  i = torch.LongTensor(indices)
-  values = coo.data
-  v = torch.FloatTensor(values)
-  shape = coo.shape
-  print('adjacency matrix generated with shape {}'.format(shape))
-  # test
-  return torch.sparse.FloatTensor(i, v, torch.Size(shape)).to(device)
+def coo2tensor(edge_index, edge_weight, device=None):
+  # indices = np.vstack((coo.row, coo.col))
+  # i = torch.LongTensor(indices)
+  # values = coo.data
+  # v = torch.FloatTensor(values)
+  # shape = coo.shape
+  # print('adjacency matrix generated with shape {}'.format(shape))
+  # # test
+  # return torch.sparse.FloatTensor(i, v, torch.Size(shape)).to(device)
+  n = maybe_num_nodes(edge_index, n)
+  index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
+  index1 = edge_index[:,0].flatten()
+  index2 = edge_index[:,1].flatten()
+  indices = torch.stack([index0, index1, index2] , dim=0)
+  weight_mat = torch.sparse_coo_tensor(indices, edge_weight.flatten(), [edge_index.shape[0], n, n],
+                                            requires_grad=True)
+  return weight_mat
 
 
 def get_sym_adj(data, opt, improved=False):
-  edge_index, edge_weight = gcn_norm(  # yapf: disable
-    data.edge_index, data.edge_attr, data.num_nodes,
-    improved, opt['self_loop_weight'] > 0, dtype=data.x.dtype)
-  coo = to_scipy_sparse_matrix(edge_index, edge_weight)
-  return coo2tensor(coo)
-
-
-def get_rw_adj_old(data, opt):
-  if opt['self_loop_weight'] > 0:
-    edge_index, edge_weight = add_remaining_self_loops(data.edge_index, data.edge_attr,
-                                                       fill_value=opt['self_loop_weight'])
-  else:
-    edge_index, edge_weight = data.edge_index, data.edge_attr
-  coo = to_scipy_sparse_matrix(edge_index, edge_weight)
-  normed_csc = normalize(coo, norm='l1', axis=1)
-  return coo2tensor(normed_csc.tocoo())
+  # edge_index, edge_weight = gcn_norm(  # yapf: disable
+  #   data.edge_index, data.edge_attr, data.num_nodes,
+  #   improved, opt['self_loop_weight'] > 0, dtype=data.x.dtype)
+  edge_index, edge_weight = gcn_norm_fill_val(  # yapf: disable
+    data.edge_index, data.edge_attr, opt['self_loop_weight'] > 0,
+    data.num_nodes, dtype=data.x.dtype)
+  # coo = to_scipy_sparse_matrix(edge_index, edge_weight)
+  return coo2tensor(edge_index, edge_weight)
 
 
 def get_rw_adj(edge_index, edge_weight=None, norm_dim=1, fill_value=0., num_nodes=None, dtype=None):

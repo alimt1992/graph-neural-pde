@@ -32,7 +32,7 @@ class HardAttODEblock(ODEblock):
                                          dtype=dtype)
     if self.opt['self_loop_weight'] > 0:
       edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'])
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     self.data_edge_index = edge_index.to(self.device)
     self.odefunc.edge_index = edge_index.to(self.device)  # this will be changed by attention scores
     self.odefunc.edge_weight = edge_weight.to(self.device)

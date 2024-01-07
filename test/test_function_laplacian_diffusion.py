@@ -16,8 +16,8 @@ from function_laplacian_diffusion import LaplacianODEFunc
 from GNN import GNN
 from block_constant import ConstantODEblock
 from torch_geometric.data import Data
-from torch_geometric.utils import to_dense_adj
-from utils import get_rw_adj, get_sym_adj
+# from torch_geometric.utils import to_dense_adj
+from utils import get_rw_adj, get_sym_adj, to_dense_adj
 from test_params import OPT
 
 

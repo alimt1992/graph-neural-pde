@@ -12,12 +12,12 @@ import torch
 from torch import tensor
 from torch import nn
 import torch_sparse
-from torch_geometric.utils import softmax, to_dense_adj
+from torch_geometric.utils import softmax#, to_dense_adj
 
 from function_transformer_attention import SpGraphTransAttentionLayer, ODEFuncTransformerAtt
 from data import get_dataset
 from test_params import OPT
-from utils import ROOT_DIR
+from utils import to_dense_adj, ROOT_DIR
 
 class AttentionTests(unittest.TestCase):
   def setUp(self):
@@ -62,8 +62,8 @@ class AttentionTests(unittest.TestCase):
       att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(self.x, self.edge)  # should be n_edges x n_heads
       self.assertTrue(attention.shape == (self.edge.shape[0], self.edge.shape[2], self.opt['heads']))
-      dense_attention1 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-      dense_attention2 = torch.stack([to_dense_adj(self.edge[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention1 = to_dense_adj(self.edge, edge_attr=attention[:, :, 0])
+      dense_attention2 = to_dense_adj(self.edge, edge_attr=attention[:, :, 1])
 
       def get_round_sum(tens, n_digits=3):
         val = torch.sum(tens, dim=int(not self.opt['attention_norm_idx']) + 1)
@@ -86,8 +86,8 @@ class AttentionTests(unittest.TestCase):
       att_layer = SpGraphTransAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
       self.assertTrue(attention.shape == (1, data.edge_index.shape[2], self.opt['heads']))
-      dense_attention1 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 0]).squeeze() for i in range(self.edge.shape[0])], dim=0)
-      dense_attention2 = torch.stack([to_dense_adj(data.edge_index[i], edge_attr=attention[i, :, 1]).squeeze() for i in range(self.edge.shape[0])], dim=0)
+      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 0])
+      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
       print('sums:', torch.sum(torch.isclose(dense_attention1, torch.ones(size=dense_attention1.shape))), dense_attention1.shape)
       print('da1', dense_attention1)
       print('da2', dense_attention2)

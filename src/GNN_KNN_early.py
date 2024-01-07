@@ -15,8 +15,8 @@ from model_configurations import set_block, set_function
 
 
 class GNNKNNEarly(BaseGNN):
-  def __init__(self, opt, dataset, device=torch.device('cpu')):
-    super(GNNKNNEarly, self).__init__(opt, dataset, device)
+  def __init__(self, opt, num_classes, num_features, device=torch.device('cpu')):
+    super(GNNKNNEarly, self).__init__(opt, num_classes, num_features, device)
     self.f = set_function(opt)
     block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
@@ -140,7 +140,8 @@ class GNNKNNEarly(BaseGNN):
 def main(opt):
   dataset = get_dataset(opt, '../data', False)
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model, data = GNNKNNEarly(opt, dataset, device).to(device), dataset.data.to(device)
+  num_classes, num_features = None, None#ToDo
+  model, data = GNNKNNEarly(opt, num_classes, num_features, device).to(device), dataset.data.to(device)
   model.set_solver_data(dataset.data)
   print(opt)
   # todo for some reason the submodule parameters inside the attention module don't show up when running on GPU.

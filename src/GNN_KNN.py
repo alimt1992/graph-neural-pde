@@ -8,14 +8,14 @@ from utils import DummyData, get_full_adjacency
 
 # Define the GNN model.
 class GNN_KNN(BaseGNN):
-  def __init__(self, opt, dataset, device=torch.device('cpu')):
-    super(GNN_KNN, self).__init__(opt, dataset, device)
+  def __init__(self, opt, num_classes, num_features, device=torch.device('cpu')):
+    super(GNN_KNN, self).__init__(opt, num_classes, num_features, device)
     self.f = set_function(opt)
     block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
     self.odeblock = block(self.f, self.regularization_fns, opt, device, t=time_tensor).to(device)
-    self.data_edge_index = dataset.data.edge_index.to(device)
-    self.fa = get_full_adjacency(self.num_nodes).to(device)
+    # self.data_edge_index = dataset.data.edge_index.to(device)
+    # self.fa = get_full_adjacency(self.num_nodes).to(device)
 
   def forward(self, x, graph_data, pos_encoding):
     # Encode each node based on its feature.

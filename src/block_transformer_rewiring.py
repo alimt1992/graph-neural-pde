@@ -35,7 +35,7 @@ class RewireAttODEblock(ODEblock):
                                          dtype=dtype)
     if self.opt['self_loop_weight'] > 0:
       edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'])
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     self.data_edge_index = edge_index.to(self.device)
     self.odefunc.edge_index = edge_index.to(self.device)  # this will be changed by attention scores
     self.odefunc.edge_weight = edge_weight.to(self.device)
@@ -207,7 +207,7 @@ class RewireAttODEblock(ODEblock):
     index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
     index1 = torch.arange(2).unsqueeze(0).unsqueeze(2)
     index2 = mask.unsqueeze(1)
-    mask = mask.transpose(0,1)
+    # mask = mask.transpose(0,1)
     self.odefunc.edge_index = self.data_edge_index[index0, index1, index2]
     sampled_attention_weights = self.renormalise_attention(mean_att[mask])
     print('retaining {} of {} edges'.format(self.odefunc.edge_index.shape[2], self.data_edge_index.shape[2]))
@@ -235,11 +235,12 @@ class RewireAttODEblock(ODEblock):
 
         self.threshold_edges(x, threshold)
 
-    self.odefunc.edge_index = self.data_edge_index
-    attention_weights = self.get_attention_weights(x)
-    mean_att = attention_weights.mean(dim=2, keepdim=False)
-    self.odefunc.edge_weight = mean_att
-    self.odefunc.attention_weights = mean_att
+    else:
+      self.odefunc.edge_index = self.data_edge_index
+      attention_weights = self.get_attention_weights(x)
+      mean_att = attention_weights.mean(dim=2, keepdim=False)
+      self.odefunc.edge_weight = mean_att
+      self.odefunc.attention_weights = mean_att
 
     self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
     self.reg_odefunc.odefunc.attention_weights = self.odefunc.attention_weights

@@ -23,19 +23,20 @@ class ConstantODEblock(ODEblock):
     self.set_tol()
 
   def reset_graph_data(self, data, dtype):
+    self.num_nodes = data.num_nodes
     if self.opt['data_norm'] == 'rw':
       edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
                                            fill_value=self.opt['self_loop_weight'],
                                            num_nodes=data.num_nodes,
-                                           dtype=data.x.dtype)
+                                           dtype=dtype)
     else:
       edge_index, edge_weight = gcn_norm_fill_val(data.edge_index, edge_weight=data.edge_attr,
                                                   fill_value=self.opt['self_loop_weight'],
                                                   num_nodes=data.num_nodes,
-                                                  dtype=data.dtype)
+                                                  dtype=dtype)
     if self.opt['self_loop_weight'] > 0:
       edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'])
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     self.odefunc.edge_index = edge_index.to(self.device)
     self.odefunc.edge_weight = edge_weight.to(self.device)
     self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
@@ -132,13 +133,20 @@ class ConstantODEblock(ODEblock):
           mean_att = mean_att * delta
         threshold = torch.quantile(mean_att, 1-self.opt['att_samp_pct'])
         mask = mean_att > threshold
-        self.odefunc.edge_index = self.data_edge_index[:, :, mask.T]
+        index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
+        index1 = torch.arange(2).unsqueeze(0).unsqueeze(2)
+        index2 = mask.unsqueeze(1)
+        # mask = mask.transpose(0,1)
+        self.odefunc.edge_index = self.data_edge_index[index0, index1, index2]
         sampled_attention_weights = self.renormalise_attention(mean_att[mask])
         print('retaining {} of {} edges'.format(self.odefunc.edge_index.shape[2], self.data_edge_index.shape[2]))
+        self.odefunc.edge_weight = sampled_attention_weights
         self.odefunc.attention_weights = sampled_attention_weights
     else:
       self.odefunc.edge_index = self.data_edge_index
       self.odefunc.attention_weights = attention_weights.mean(dim=2, keepdim=False)
+      self.odefunc.edge_weight = self.odefunc.attention_weights
+    
     self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
     self.reg_odefunc.odefunc.attention_weights = self.odefunc.attention_weights
 

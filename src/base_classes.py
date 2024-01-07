@@ -96,13 +96,12 @@ class ODEFunc(MessagePassing):
 
 
 class BaseGNN(MessagePassing):
-  def __init__(self, opt, dataset, device=torch.device('cpu')):
+  def __init__(self, opt, num_classes, num_features, device=torch.device('cpu')):
     super(BaseGNN, self).__init__()
     self.opt = opt
     self.T = opt['time']
-    self.num_classes = dataset.num_classes
-    self.num_features = dataset.data.num_features
-    self.num_nodes = dataset.data.num_nodes
+    self.num_classes = num_classes
+    self.num_features = num_features
     self.device = device
     self.fm = Meter()
     self.bm = Meter()
@@ -119,13 +118,13 @@ class BaseGNN(MessagePassing):
       self.m12 = nn.Linear(opt['hidden_dim'], opt['hidden_dim'])
     if opt['use_labels']:
       # todo - fastest way to propagate this everywhere, but error prone - refactor later
-      opt['hidden_dim'] = opt['hidden_dim'] + dataset.num_classes
+      opt['hidden_dim'] = opt['hidden_dim'] + num_classes
       self.hidden_dim = opt['hidden_dim']
     else:
       self.hidden_dim = opt['hidden_dim']
     if opt['fc_out']:
       self.fc = nn.Linear(opt['hidden_dim'], opt['hidden_dim'])
-    self.m2 = nn.Linear(opt['hidden_dim'], dataset.num_classes)
+    self.m2 = nn.Linear(opt['hidden_dim'], num_classes)
     if self.opt['batch_norm']:
       self.bn_in = torch.nn.BatchNorm1d(opt['hidden_dim'])
       self.bn_out = torch.nn.BatchNorm1d(opt['hidden_dim'])

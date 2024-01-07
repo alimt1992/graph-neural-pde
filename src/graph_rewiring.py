@@ -166,7 +166,11 @@ def edge_sampling(model, z, opt):
     threshold = torch.quantile(pos_enc_distances, 1 - opt['edge_sampling_rmv'])
     mask = pos_enc_distances < threshold
 
-  model.odeblock.odefunc.edge_index = model.odeblock.odefunc.edge_index[:, mask.T]
+  index0 = torch.arange(x.shape[0]).unsqueeze(1).unsqueeze(2)
+  index1 = torch.arange(2).unsqueeze(0).unsqueeze(2)
+  index2 = mask.unsqueeze(1)
+  # model.odeblock.odefunc.edge_index = model.odeblock.odefunc.edge_index[:, mask.T]
+  model.odeblock.odefunc.edge_index = model.odeblock.odefunc.edge_index[index0, index1, index2]
 
   if opt['edge_sampling_sym']:
     model.odeblock.odefunc.edge_index = to_undirected(model.odeblock.odefunc.edge_index)
@@ -181,7 +185,7 @@ def add_outgoing_attention_edges(model, M):
   :params M: The number of edges to add. 2 * M get added to the edges index to make them undirected
   """
   atts = model.odeblock.odefunc.attention_weights.mean(dim=2)
-  dst = model.odeblock.odefunc.edge_index[1, :]
+  dst = model.odeblock.odefunc.edge_index[:, 1, :]
 
   importance = scatter(atts, dst, dim=1, dim_size=model.num_nodes,
                        reduce='sum').to(model.device)  # column sum to represent outgoing importance
@@ -199,8 +203,8 @@ def add_outgoing_attention_edges(model, M):
 
 @torch.no_grad()
 def add_edges(model, opt):
-  num_nodes = model.num_nodes
-  num_edges = model.odeblock.odefunc.edge_index.shape[1]
+  num_nodes = model.odeblock.num_nodes
+  num_edges = model.odeblock.odefunc.edge_index.shape[2]
   M = int(num_edges * opt['edge_sampling_add'])
   # generate new edges and add to edge_index
   if opt['edge_sampling_add_type'] == 'random':
@@ -220,8 +224,21 @@ def add_edges(model, opt):
     pass
   elif opt['edge_sampling_add_type'] == 'n2_radius':
     return get_full_adjacency(num_nodes)
-  new_ei = torch.stack([torch.unique(cat[i], sorted=False, return_inverse=False,
-                                return_counts=False, dim=1) for i in range(cat.shape[0])], dim=0)
+  
+  n = num_nodes
+  index0 = torch.arange(cat.shape[0])[:, None].expand(cat.shape[0], cat.shape[2]).flatten()
+  index1 = cat[:,0].flatten()
+  index2 = cat[:,1].flatten()
+  indices = torch.stack([index0, index1, index2] , dim=0)
+  edge_mat = torch.sparse_coo_tensor(indices, torch.ones(cat.shape[0], cat.shape(2)), [cat.shape[0], n, n],
+                                     requires_grad=True).to(model.device).to_dense()
+  nonzero_mask = torch.zeros_like(edge_mat)
+  nonzero_mask[edge_mat != 0] = 1
+  nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
+  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(cat.shape[0], n*n, 2)
+  new_edges = new_edges * nonzero_mask
+  sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+  new_ei = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
   return new_ei
 
 

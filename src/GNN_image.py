@@ -8,7 +8,7 @@ from collections import namedtuple
 
 # Define the GNN model.
 class GNN_image(BaseGNN):
-  def __init__(self, opt, data, num_classes, device=torch.device('cpu')):
+  def __init__(self, opt, num_classes, num_features, device=torch.device('cpu')):
     DataWrapper = namedtuple('DataWrapper', ['num_features'])
     dw = DataWrapper(1)
     DatasetWrapper = namedtuple('DatasetWrapper', ['data', 'num_classes'])

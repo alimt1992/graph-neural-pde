@@ -5,7 +5,7 @@ from utils import get_rw_adj, gcn_norm_fill_val, add_remaining_self_loops
 
 class ConstantODEblock(ODEblock):
   def __init__(self, odefunc, regularization_fns, opt, device, t=torch.tensor([0, 1])):
-    super(ConstantODEblock, self).__init__(odefunc, regularization_fns, opt, data, device, t)
+    super(ConstantODEblock, self).__init__(odefunc, regularization_fns, opt, device, t)
 
     self.device = device
     self.aug_dim = 2 if opt['augment'] else 1
@@ -21,11 +21,12 @@ class ConstantODEblock(ODEblock):
     self.set_tol()
   
   def reset_graph_data(self, data, dtype):
+    self.num_nodes = data.num_nodes
     if self.opt['data_norm'] == 'rw':
       edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
                                            fill_value=self.opt['self_loop_weight'],
                                            num_nodes=data.num_nodes,
-                                           dtype=data.x.dtype)
+                                           dtype=dtype)
     else:
       edge_index, edge_weight = gcn_norm_fill_val(data.edge_index, edge_weight=data.edge_attr,
                                                   fill_value=self.opt['self_loop_weight'],
@@ -33,7 +34,7 @@ class ConstantODEblock(ODEblock):
                                                   dtype=dtype)
     if self.opt['self_loop_weight'] > 0:
       edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'])
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     
     self.odefunc.edge_index = edge_index.to(self.device)
     self.odefunc.edge_weight = edge_weight.to(self.device)

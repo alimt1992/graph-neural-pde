@@ -24,13 +24,14 @@ class AttODEblock(ODEblock):
                                                           device, edge_weights=self.odefunc.edge_weight).to(device)
 
   def reset_graph_data(self, data, dtype):
+    self.num_nodes = data.num_nodes
     edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
                                          fill_value=self.opt['self_loop_weight'],
                                          num_nodes=data.num_nodes,
                                          dtype=dtype)
     if self.opt['self_loop_weight'] > 0:
       edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'])
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     self.odefunc.edge_index = edge_index.to(self.device)
     self.odefunc.edge_weight = edge_weight.to(self.device)
     self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
