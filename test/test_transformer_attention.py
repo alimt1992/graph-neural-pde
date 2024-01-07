@@ -12,12 +12,12 @@ import torch
 from torch import tensor
 from torch import nn
 import torch_sparse
-from torch_geometric.utils import softmax
+# from torch_geometric.utils import softmax
 
 from function_transformer_attention import SpGraphTransAttentionLayer, ODEFuncTransformerAtt
 from data import get_dataset
 from test_params import OPT
-from utils import to_dense_adj, ROOT_DIR
+from utils import to_dense_adj, softmax, ROOT_DIR
 
 class AttentionTests(unittest.TestCase):
   def setUp(self):
@@ -52,7 +52,8 @@ class AttentionTests(unittest.TestCase):
     ah = self.alpha.matmul(edge_h.transpose(1,2)).transpose(1,2)
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
-    attention = softmax(edge_e[0], self.edge[0, 1])
+    # attention = softmax(edge_e[0], self.edge[0, 1])
+    attention = softmax(edge_e, self.edge[:, 1])
     print(attention)
 
   def test_function(self):

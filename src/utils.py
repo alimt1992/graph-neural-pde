@@ -6,7 +6,7 @@ import os
 import scipy
 from scipy.stats import sem
 import numpy as np
-from torch_scatter import scatter_add
+from torch_scatter import scatter_add, scatter_max
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -54,6 +54,17 @@ def to_dense_adj(edge_index, edge_attr=None):
   adj_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
                                             requires_grad=True).to_dense()
   return adj_mat
+
+
+def softmax(src, index, num_nodes=None):
+    num_nodes = maybe_num_nodes(index, num_nodes)
+
+    out = src - scatter_max(src, index, dim=1, dim_size=num_nodes)[0][index]
+    out = out.exp()
+    out = out / (
+        scatter_add(out, index, dim=1, dim_size=num_nodes)[index] + 1e-16)
+
+    return out
 
 
 def rms_norm(tensor):
