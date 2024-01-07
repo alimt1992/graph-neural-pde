@@ -14,7 +14,7 @@ from torch import tensor
 from torch import nn
 
 from function_GAT_attention import SpGraphAttentionLayer, ODEFuncAtt
-from torch_geometric.utils import softmax#, to_dense_adj
+from torch_geometric.utils import softmax
 from utils import to_dense_adj
 from data import get_dataset
 from test_params import OPT

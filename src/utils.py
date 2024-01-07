@@ -8,9 +8,6 @@ from scipy.stats import sem
 import numpy as np
 from torch_scatter import scatter_add
 from torch_geometric.utils.num_nodes import maybe_num_nodes
-from torch_geometric.utils.convert import to_scipy_sparse_matrix
-from sklearn.preprocessing import normalize
-# from torch_geometric.nn.conv.gcn_conv import gcn_norm
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -48,15 +45,15 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value, num_nodes):
 def remove_self_loops(edge_index, edge_attr):
   pass
 
-def to_dense_adj(edge_index, edge_weight):
-  n = maybe_num_nodes(edge_index, n)
+def to_dense_adj(edge_index, edge_attr=None):
+  n = maybe_num_nodes(edge_index, None)
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
   index1 = edge_index[:,0].flatten()
   index2 = edge_index[:,1].flatten()
   indices = torch.stack([index0, index1, index2] , dim=0)
-  weight_mat = torch.sparse_coo_tensor(indices, edge_weight.flatten(), [edge_index.shape[0], n, n],
+  adj_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
                                             requires_grad=True).to_dense()
-  return weight_mat
+  return adj_mat
 
 
 def rms_norm(tensor):
@@ -114,32 +111,20 @@ def gcn_norm_fill_val(edge_index, edge_weight=None, fill_value=0., num_nodes=Non
 
 
 def coo2tensor(edge_index, edge_weight, device=None):
-  # indices = np.vstack((coo.row, coo.col))
-  # i = torch.LongTensor(indices)
-  # values = coo.data
-  # v = torch.FloatTensor(values)
-  # shape = coo.shape
-  # print('adjacency matrix generated with shape {}'.format(shape))
-  # # test
-  # return torch.sparse.FloatTensor(i, v, torch.Size(shape)).to(device)
   n = maybe_num_nodes(edge_index, n)
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
   index1 = edge_index[:,0].flatten()
   index2 = edge_index[:,1].flatten()
   indices = torch.stack([index0, index1, index2] , dim=0)
   weight_mat = torch.sparse_coo_tensor(indices, edge_weight.flatten(), [edge_index.shape[0], n, n],
-                                            requires_grad=True)
+                                            requires_grad=True, device=device)
   return weight_mat
 
 
 def get_sym_adj(data, opt, improved=False):
-  # edge_index, edge_weight = gcn_norm(  # yapf: disable
-  #   data.edge_index, data.edge_attr, data.num_nodes,
-  #   improved, opt['self_loop_weight'] > 0, dtype=data.x.dtype)
   edge_index, edge_weight = gcn_norm_fill_val(  # yapf: disable
     data.edge_index, data.edge_attr, opt['self_loop_weight'] > 0,
     data.num_nodes, dtype=data.x.dtype)
-  # coo = to_scipy_sparse_matrix(edge_index, edge_weight)
   return coo2tensor(edge_index, edge_weight)
 
 

@@ -12,7 +12,7 @@ import torch
 from torch import tensor
 from torch import nn
 import torch_sparse
-from torch_geometric.utils import softmax#, to_dense_adj
+from torch_geometric.utils import softmax
 
 from function_transformer_attention import SpGraphTransAttentionLayer, ODEFuncTransformerAtt
 from data import get_dataset

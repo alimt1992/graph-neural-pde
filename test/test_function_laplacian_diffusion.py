@@ -58,7 +58,7 @@ class FunctionLaplacianDiffusionTests(unittest.TestCase):
     # construct a pyg dataset
     num_nodes = 3
     dataset = DummyDataset(self.data, num_nodes)
-    gnn = GNN(self.opt, dataset, device=self.device)
+    gnn = GNN(self.opt, 2, dataset.num_features, device=self.device)
     odeblock = gnn.odeblock
     self.assertTrue(isinstance(odeblock, ConstantODEblock))
     func = odeblock.odefunc
