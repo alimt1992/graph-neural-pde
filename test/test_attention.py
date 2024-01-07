@@ -88,7 +88,7 @@ class AttentionTests(unittest.TestCase):
 
       self.assertTrue(attention.shape == (data.edge_index.shape[0], data.edge_index.shape[2], self.opt['heads']))
       dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 0])
-      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
+      dense_attention2 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention1), 1.)))
       self.assertTrue(torch.all(torch.eq(get_round_sum(dense_attention2), 1.)))
       self.assertTrue(torch.all(attention > 0.))

@@ -52,8 +52,8 @@ class AttentionTests(unittest.TestCase):
     ah = self.alpha.matmul(edge_h.transpose(1,2)).transpose(1,2)
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
-    # attention = softmax(edge_e[0], self.edge[0, 1])
-    attention = torch.softmax(edge_e, dim=1)
+    attention = softmax(edge_e, self.edge[:, 1])
+    # attention = torch.softmax(edge_e, dim=1)
     print(attention)
 
   def test_function(self):
@@ -88,7 +88,7 @@ class AttentionTests(unittest.TestCase):
       attention, _ = att_layer(data.x, data.edge_index)  # should be n_edges x n_heads
       self.assertTrue(attention.shape == (1, data.edge_index.shape[2], self.opt['heads']))
       dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 0])
-      dense_attention1 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
+      dense_attention2 = to_dense_adj(data.edge_index, edge_attr=attention[:, :, 1])
       print('sums:', torch.sum(torch.isclose(dense_attention1, torch.ones(size=dense_attention1.shape))), dense_attention1.shape)
       print('da1', dense_attention1)
       print('da2', dense_attention2)
@@ -105,7 +105,7 @@ class AttentionTests(unittest.TestCase):
       attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
 
       self.assertTrue(torch.all(torch.isclose(att_layer.Q.weight, att_layer.K.weight)))
-      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
+      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((1, self.edge1.shape[2], self.x1.shape[2])))))
 
   def test_module(self):
     dataset = get_dataset(self.opt, f'{ROOT_DIR}/data', False)
