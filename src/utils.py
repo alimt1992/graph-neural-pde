@@ -2,7 +2,7 @@
 utility functions
 """
 import os
-
+import torch
 import scipy
 from scipy.stats import sem
 import numpy as np
@@ -57,14 +57,30 @@ def to_dense_adj(edge_index, edge_attr=None):
 
 
 def softmax(src, index, num_nodes=None):
-    num_nodes = maybe_num_nodes(index, num_nodes)
+  num_nodes = maybe_num_nodes(index, num_nodes)
 
-    out = src - scatter_max(src, index, dim=1, dim_size=num_nodes)[0][index]
-    out = out.exp()
-    out = out / (
-        scatter_add(out, index, dim=1, dim_size=num_nodes)[index] + 1e-16)
+  index0 = torch.arange(src.shape[0]).unsqueeze(1).unsqueeze(2)
+  index1 = index.unsqueeze(2)
+  index2 = torch.arange(src.shape[2]).unsqueeze(0).unsqueeze(0)
+  out = src - scatter_max(src, index, dim=1, dim_size=num_nodes)[0][index0, index1, index2]
+  out = out.exp()
+  out = out / (
+      scatter_add(out, index, dim=1, dim_size=num_nodes)[index0, index1, index2] + 1e-16)
 
-    return out
+  return out
+
+def squareplus(src, index, num_nodes):
+  num_nodes = maybe_num_nodes(index, num_nodes)
+  
+  out = src - src.amax(dim=[1,2], keepdim=True)
+  out = (out + torch.sqrt(out ** 2 + 4)) / 2
+
+  index0 = torch.arange(src.shape[0]).unsqueeze(1).unsqueeze(2)
+  index1 = index.unsqueeze(2)
+  index2 = torch.arange(src.shape[2]).unsqueeze(0).unsqueeze(0)
+  out_sum = scatter_add(out, index, dim=1, dim_size=num_nodes)[index0, index1, index2]
+
+  return out / (out_sum + 1e-16)
 
 
 def rms_norm(tensor):
@@ -202,47 +218,6 @@ def get_full_adjacency(batch_size, num_nodes):
     edge_index[:, 0, idx * num_nodes: (idx + 1) * num_nodes] = idx
     edge_index[:, 1, idx * num_nodes: (idx + 1) * num_nodes] = torch.arange(0, num_nodes,dtype=torch.long)[None, :].expand(batch_size, num_nodes)
   return edge_index
-
-
-
-from typing import Optional
-import torch
-from torch import Tensor
-from torch_scatter import scatter, segment_csr, gather_csr
-
-
-# https://twitter.com/jon_barron/status/1387167648669048833?s=12
-# @torch.jit.script
-def squareplus(src: Tensor, index: Optional[Tensor], ptr: Optional[Tensor] = None,
-               num_nodes: Optional[int] = None) -> Tensor:
-  r"""Computes a sparsely evaluated softmax.
-    Given a value tensor :attr:`src`, this function first groups the values
-    along the first dimension based on the indices specified in :attr:`index`,
-    and then proceeds to compute the softmax individually for each group.
-
-    Args:
-        src (Tensor): The source tensor.
-        index (LongTensor): The indices of elements for applying the softmax.
-        ptr (LongTensor, optional): If given, computes the softmax based on
-            sorted inputs in CSR representation. (default: :obj:`None`)
-        num_nodes (int, optional): The number of nodes, *i.e.*
-            :obj:`max_val + 1` of :attr:`index`. (default: :obj:`None`)
-
-    :rtype: :class:`Tensor`
-    """
-  out = src - src.max()
-  # out = out.exp()
-  out = (out + torch.sqrt(out ** 2 + 4)) / 2
-
-  if ptr is not None:
-    out_sum = gather_csr(segment_csr(out, ptr, reduce='sum'), ptr)
-  elif index is not None:
-    N = maybe_num_nodes(index, num_nodes)
-    out_sum = scatter(out, index, dim=0, dim_size=N, reduce='sum')[index]
-  else:
-    raise NotImplementedError
-
-  return out / (out_sum + 1e-16)
 
 
 # Counter of forward and backward passes.

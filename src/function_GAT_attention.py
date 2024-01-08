@@ -1,8 +1,6 @@
 import torch
 from torch import nn
 import numpy as np
-# from torch_geometric.utils import softmax
-import torch_sparse
 from data import get_dataset
 from utils import MaxNFEException, softmax
 from base_classes import ODEFunc
@@ -56,7 +54,6 @@ class ODEFuncAtt(ODEFunc):
 
     attention, wx = self.multihead_att_layer(x, self.edge_index, y)
     ax = self.multiply_attention(x, attention, wx)
-    # todo would be nice if this was more efficient
 
     if not self.opt['no_alpha_sigmoid']:
       alpha = torch.sigmoid(self.alpha_train)
@@ -133,8 +130,7 @@ class SpGraphAttentionLayer(nn.Module):
                         h[index0, edge[:, 1, :].unsqueeze(2).unsqueeze(3), index2, index3]),
                         dim=2).transpose(1, 2).to(self.device)  # edge: 2*D x E
     edge_e = self.leakyrelu(torch.sum(self.a * edge_h, dim=1)).to(self.device)
-    # attention = torch.stack([softmax(edge_e[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(edge_e.shape[0])], dim=0)###
-    attention = torch.softmax(edge_e, dim=1)
+    attention = softmax(edge_e, edge[:, self.opt['attention_norm_idx'], :])
     return attention, wx
 
   def __repr__(self):

@@ -14,7 +14,6 @@ from torch import tensor
 from torch import nn
 
 from function_GAT_attention import SpGraphAttentionLayer, ODEFuncAtt
-# from torch_geometric.utils import softmax
 from utils import to_dense_adj, softmax
 from data import get_dataset
 from test_params import OPT
@@ -51,8 +50,7 @@ class AttentionTests(unittest.TestCase):
     ah = self.alpha.matmul(edge_h.transpose(1,2)).transpose(1,2)
     self.assertTrue(ah.shape == torch.Size([self.edge.shape[0], self.edge.shape[2], 1]))
     edge_e = self.leakyrelu(ah)
-    # attention = softmax(edge_e[0], self.edge[0,1])
-    attention = torch.softmax(edge_e, dim=1)
+    attention = softmax(edge_e, self.edge[:, 1])
     print(attention)
 
   def test_function(self):
@@ -101,7 +99,7 @@ class AttentionTests(unittest.TestCase):
       att_layer = SpGraphAttentionLayer(in_features, out_features, self.opt, self.device, concat=True)
       attention, _ = att_layer(self.x1, self.edge1)  # should be n_edges x n_heads
 
-      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[2], self.x1.shape[2])))))
+      self.assertTrue(torch.all(torch.eq(attention, 0.5 * torch.ones((self.edge1.shape[0], self.edge1.shape[2], self.x1.shape[2])))))
 
   def test_module(self):
     dataset = get_dataset(self.opt, '../data', False)

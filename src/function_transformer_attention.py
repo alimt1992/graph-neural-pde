@@ -1,7 +1,5 @@
 import torch
 from torch import nn
-# from torch_geometric.utils import softmax
-import torch_sparse
 import numpy as np
 from data import get_dataset
 from utils import MaxNFEException, squareplus, softmax
@@ -263,9 +261,7 @@ class SpGraphTransAttentionLayer(nn.Module):
     if self.opt['square_plus']:
       attention = torch.stack([squareplus(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
     else:
-      # attention = torch.stack([softmax(prods[i], edge[i,self.opt['attention_norm_idx'],:]) for i in range(prods.shape[0])], dim=0)###
-      attention = softmax(prods, edge[:,self.opt['attention_norm_idx'],:])###
-      # attention = torch.softmax(prods, dim=1)
+      attention = softmax(prods, edge[:, self.opt['attention_norm_idx'], :])
     return attention, (v, prods)
 
   def __repr__(self):
