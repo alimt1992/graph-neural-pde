@@ -14,7 +14,7 @@ class GNN(BaseGNN):
     time_tensor = torch.tensor([0, self.T]).to(device)
     self.odeblock = block(self.f, self.regularization_fns, opt, device, t=time_tensor).to(device)
 
-  def forward(self, x, graph_data, pos_encoding=None):
+  def forward(self, x, graph_data, x2=None, pos_encoding=None):
     # Encode each node based on its feature.
     if self.opt['use_labels']:
       y = x[:, :, -self.num_classes:]
@@ -48,11 +48,13 @@ class GNN(BaseGNN):
       x = torch.cat([x, c_aux], dim=-1)
 
     self.odeblock.set_x0(x)
+    self.graph_data.new_graph(graph_data, x.shape[1])
+    graph_data = self.graph_data
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x, graph_data)
+      z, self.reg_states = self.odeblock(x, graph_data, x2)
     else:
-      z = self.odeblock(x, graph_data)
+      z = self.odeblock(x, graph_data, x2)
 
     if self.opt['augment']:
       z = torch.split(z, x.shape[2] // 2, dim=-1)[0]

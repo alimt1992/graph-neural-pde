@@ -6,6 +6,7 @@ from utils import Meter
 from regularized_ODE_function import RegularizedODEfunc
 import regularized_ODE_function as reg_lib
 import six
+from functools import partial
 
 
 REGULARIZATION_FNS = {
@@ -38,9 +39,19 @@ class ODEblock(nn.Module):
     
     self.aug_dim = 2 if opt['augment'] else 1
     self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, device)
+    self.ode_last_call_time = [0 for i in range(self.opt['ode_order'])]
+    #storing function time on last call in order to avoid recomputation
+    self.ode_last_integrals = [0 for i in range(self.opt['ode_order'])]
+    #storing function value on last call in order to avoid recomputation
+    #need to be set befor each call as the initial value problem needs them
     
     self.nreg = len(regularization_fns)
-    self.reg_odefunc = RegularizedODEfunc(self.odefunc, regularization_fns)
+    if self.opt['ode_order'] == 1:
+      self.reg_odefunc = RegularizedODEfunc(self.odefunc, regularization_fns)
+    else:
+      func = partial(self, graph_data=None, y=None, ode_order=self.opt['ode_order']-1)
+      #recursive function calls for higher order pdes
+      self.reg_odefunc = RegularizedODEfunc(func, regularization_fns)
 
     if opt['adjoint']:
       from torchdiffeq import odeint_adjoint as odeint
@@ -68,26 +79,25 @@ class ODEblock(nn.Module):
     self.rtol_adjoint = 1e-9
   
   def reset_graph_data(self, data, dtype, y=None):
-    if data is not None:
-      self.num_nodes = data.num_nodes
-      if self.opt['data_norm'] == 'rw':
-        edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
-                                             fill_value=self.opt['self_loop_weight'],
-                                             num_nodes=data.num_nodes,
-                                             dtype=dtype)
-      else:
-        edge_index, edge_weight = gcn_norm_fill_val(data.edge_index, edge_weight=data.edge_attr,
-                                                    fill_value=self.opt['self_loop_weight'],
-                                                    num_nodes=data.num_nodes,
-                                                    dtype=dtype)
-      if self.opt['self_loop_weight'] > 0:
-        edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                           fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
-      self.data_edge_index = edge_index.to(self.device)
-      self.odefunc.edge_index = edge_index.to(self.device)
-      self.odefunc.edge_weight = edge_weight.to(self.device)
-      self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
+    self.num_nodes = data.num_nodes
+    if self.opt['data_norm'] == 'rw':
+      edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
+                                           fill_value=self.opt['self_loop_weight'],
+                                           num_nodes=data.num_nodes,
+                                           dtype=dtype)
+    else:
+      edge_index, edge_weight = gcn_norm_fill_val(data.edge_index, edge_weight=data.edge_attr,
+                                                  fill_value=self.opt['self_loop_weight'],
+                                                  num_nodes=data.num_nodes,
+                                                  dtype=dtype)
+    if self.opt['self_loop_weight'] > 0:
+      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
+                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
     self.odefunc.y = y
+    self.data_edge_index = edge_index.to(self.device)
+    self.odefunc.edge_index = edge_index.to(self.device)
+    self.odefunc.edge_weight = edge_weight.to(self.device)
+    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
 
 
   def set_time(self, time):
@@ -96,21 +106,6 @@ class ODEblock(nn.Module):
   def __repr__(self):
     return self.__class__.__name__ + '( Time Interval ' + str(self.t[0].item()) + ' -> ' + str(self.t[1].item()) \
            + ")"
-
-class GraphData(object):
-  def __init__(self):
-    super(GraphData, self).__init__()
-    self.edge_index = None
-    self.edge_attr = None
-    self.num_nodes = None
-
-  def new_graph(self, edge_index, num_nodes, edge_attr=None):
-    self.edge_index = edge_index
-    self.edge_attr = edge_attr
-    self.num_nodes = num_nodes
-  
-  def __repr__(self):
-    return self.__class__.__name__
 
 
 class ODEFunc(MessagePassing):
@@ -141,7 +136,6 @@ class BaseGNN(MessagePassing):
     self.T = opt['time']
     self.num_classes = num_classes
     self.num_features = num_features
-    self.graph_data = GraphData()
     self.device = device
     self.fm = Meter()
     self.bm = Meter()

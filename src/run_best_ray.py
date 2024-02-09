@@ -38,7 +38,7 @@ def run_best_params(opt):
 
   data_dir = os.path.abspath("../data")
   reporter = CLIReporter(
-    metric_columns=["accuracy", "loss", "test_acc", "train_acc", "best_time", "best_epoch", "training_iteration", "forward_nfe", "backward_nfe"])
+    metric_columns=["accuracy", "loss", "val_acc", "train_acc", "best_time", "best_epoch", "training_iteration", "forward_nfe", "backward_nfe"])
 
   if opt['name'] is None:
     name = opt['folder'] + '_test'
@@ -66,12 +66,12 @@ def run_best_params(opt):
   except:
     pass
 
-  print(df[['accuracy', 'test_acc', 'train_acc', 'best_time', 'best_epoch']])
+  print(df[['accuracy', 'val_acc', 'train_acc', 'best_time', 'best_epoch']])
 
-  test_accs = df['test_acc'].values
-  print("test accuracy {}".format(test_accs))
+  val_accs = df['val_acc'].values
+  print("test accuracy {}".format(val_accs))
   log = "mean test {:04f}, test std {:04f}, test sem {:04f}, test 95% conf {:04f}"
-  print(log.format(test_accs.mean(), np.std(test_accs), get_sem(test_accs), mean_confidence_interval(test_accs)))
+  print(log.format(val_accs.mean(), np.std(val_accs), get_sem(val_accs), mean_confidence_interval(val_accs)))
 
 
 if __name__ == '__main__':

@@ -7,13 +7,13 @@ from collections import namedtuple
 
 
 # Define the GNN model.
-class GNN_image(BaseGNN):
+class GNN_multimodal(BaseGNN):
   def __init__(self, opt, num_classes, num_features, device=torch.device('cpu')):
     DataWrapper = namedtuple('DataWrapper', ['num_features'])
     dw = DataWrapper(1)
-    DatasetWrapper = namedtuple('DatasetWrapper', ['data', 'num_classes'])
+    DatasetWrapper = namedtuple('DatasetWrapper', ['data', 'num_class'])
     dsw = DatasetWrapper(dw, num_classes)
-    super(GNN_image, self).__init__(opt, dsw, device)
+    super(GNN_multimodal, self).__init__(opt, dsw, device)
     self.f = set_function(opt)
     self.block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
@@ -24,16 +24,18 @@ class GNN_image(BaseGNN):
 
     self.m2 = nn.Linear(opt['im_width'] * opt['im_height'] * opt['im_chan'], num_classes)
 
-  def forward(self, x, graph_data):
+  def forward(self, x, graph_data, x2=None):
     # Encode each node based on its feature.
     x = F.dropout(x, self.opt['input_dropout'], training=self.training)
 
     self.odeblock.set_x0(x)
+    self.graph_data.new_graph(graph_data, x.shape[1])
+    graph_data = self.graph_data
 
     if self.training:
-      z, self.reg_states = self.odeblock(x, graph_data)
+      z, self.reg_states = self.odeblock(x, graph_data, x2)
     else:
-      z = self.odeblock(x, graph_data)
+      z = self.odeblock(x, graph_data, x2)
 
     # Activation.
     z = F.relu(z)
@@ -46,16 +48,18 @@ class GNN_image(BaseGNN):
     z = self.m2(z)
     return z
 
-  def forward_plot_T(self, x, graph_data):  # the same as forward but without the decoder
+  def forward_plot_T(self, x, graph_data, x2=None):  # the same as forward but without the decoder
     # Encode each node based on its feature.
     x = F.dropout(x, self.opt['input_dropout'], training=self.training)
 
     self.odeblock.set_x0(x)
+    self.graph_data.new_graph(graph_data, x.shape[1])
+    graph_data = self.graph_data
 
     if self.training:
-      z, self.reg_states = self.odeblock(x, graph_data)
+      z, self.reg_states = self.odeblock(x, graph_data, x2)
     else:
-      z = self.odeblock(x, graph_data)
+      z = self.odeblock(x, graph_data, x2)
 
     # Activation.
     z = F.relu(z)
@@ -67,17 +71,19 @@ class GNN_image(BaseGNN):
 
     return z
 
-  def forward_plot_path(self, x, graph_data, frames):  # stitch together ODE integrations
+  def forward_plot_path(self, x, graph_data, frames, x2=None):  # stitch together ODE integrations
     # Encode each node based on its feature.
     x = F.dropout(x, self.opt['input_dropout'], training=self.training)
     z = x
     paths = [z.view(-1, self.opt['im_width'] * self.opt['im_height'] * self.opt['im_chan'])]
     for f in range(frames):
       self.odeblock.set_x0(z)  # (x)
+      self.graph_data.new_graph(graph_data, x.shape[1])
+      graph_data = self.graph_data
       if self.training:
-        z, self.reg_states = self.odeblock(z, graph_data)
+        z, self.reg_states = self.odeblock(z, graph_data, x2)
       else:
-        z = self.odeblock(z, graph_data)
+        z = self.odeblock(z, graph_data, x2)
       # Activation.
       z = F.relu(z)
       # Dropout.

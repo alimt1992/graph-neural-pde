@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
-from data import get_dataset
+from data_multi import get_dataset
 from utils import MaxNFEException, squareplus, softmax
 from base_classes import ODEFunc
 
@@ -12,39 +12,41 @@ class ODEFuncTransformerAtt(ODEFunc):
     super(ODEFuncTransformerAtt, self).__init__(opt, device)
 
     self.device = device
-    self.multihead_att_layer = SpGraphTransAttentionLayer(in_features, out_features, opt,
-                                                          device, edge_weights=self.edge_weight).to(device)
+    self.multihead_att_layer = SpGraphTransAttentionLayer(in_features, out_features, opt, device, edge_weights=self.edge_weight).to(device)
+    
+    if self.opt['multi_modal']:
+      self.y = None
 
   def multiply_attention(self, x, attention, v=None):
     # todo would be nice if this was more efficient
     with (torch.device(self.device)):
       if self.opt['mix_features']:
         index0 = torch.arange(self.edge_index.shape[0])[:, None, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-        index1 = self.edge_index[:,0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
-        index2 = self.edge_index[:,1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index1 = self.edge_index[:, 0][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
+        index2 = self.edge_index[:, 1][:, :, None].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
         index3 = torch.arange(self.opt['heads'])[None, None, :].expand(self.edge_index.shape[0], self.edge_index.shape[2], self.opt['heads']).flatten()
         indices = torch.stack([index0, index1, index2, index3] , dim=0)
         sparse_att = torch.sparse_coo_tensor(indices, attention.flatten(), [v.shape[0], v.shape[1], v.shape[1], self.opt['heads']],
                                              requires_grad=True).to(self.device)
-        vx = torch.mean(torch.matmul(sparse_att.permute(0,3,1,2).to_dense(), v.permute(0,3,1,2)), dim=1)
+        vx = torch.mean(torch.matmul(sparse_att.permute(0, 3, 1, 2).to_dense(), v.permute(0, 3, 1, 2)), dim=1)
         ax = self.multihead_att_layer.Wout(vx)
       else:
         mean_attention = attention.mean(dim=2)
         index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-        index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-        index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+        index1 = self.edge_index[:, 0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+        index2 = self.edge_index[:, 1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
         indices = torch.stack([index0, index1, index2] , dim=0)
         sparse_att = torch.sparse_coo_tensor(indices, mean_attention.flatten(), [x.shape[0], x.shape[1], x.shape[1]],
                                              requires_grad=True).to(self.device)
         ax = torch.matmul(sparse_att.to_dense(), x)
     return ax
 
-  def forward(self, t, x, y=None):  # t is needed when called by the integrator
+  def forward(self, t, x):  # t is needed when called by the integrator
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException
 
     self.nfe += 1
-    attention, values = self.multihead_att_layer(x, self.edge_index, y)
+    attention, values = self.multihead_att_layer(x, self.edge_index, self.y)
     ax = self.multiply_attention(x, attention, values)
 
     if not self.opt['no_alpha_sigmoid']:
@@ -90,11 +92,11 @@ class SpGraphTransAttentionLayer(nn.Module):
       self.lengthscale_x = nn.Parameter(torch.ones(1))
       self.output_var_p = nn.Parameter(torch.ones(1))
       self.lengthscale_p = nn.Parameter(torch.ones(1))
-      self.Qx = nn.Linear(opt['hidden_dim']-opt['pos_enc_hidden_dim'], self.attention_dim)
+      self.Qx = nn.Linear(opt['hidden_dim'] - opt['pos_enc_hidden_dim'], self.attention_dim)
       self.init_weights(self.Qx)
-      self.Vx = nn.Linear(opt['hidden_dim']-opt['pos_enc_hidden_dim'], self.attention_dim)
+      self.Vx = nn.Linear(opt['hidden_dim'] - opt['pos_enc_hidden_dim'], self.attention_dim)
       self.init_weights(self.Vx)
-      self.Kx = nn.Linear(opt['hidden_dim']-opt['pos_enc_hidden_dim'], self.attention_dim)
+      self.Kx = nn.Linear(opt['hidden_dim'] - opt['pos_enc_hidden_dim'], self.attention_dim)
       self.init_weights(self.Kx)
 
       self.Qp = nn.Linear(opt['pos_enc_hidden_dim'], self.attention_dim)
@@ -106,11 +108,11 @@ class SpGraphTransAttentionLayer(nn.Module):
 
       #if there is other modality
       if self.opt['multi_modal']:
-        self.Q2 = nn.Linear(opt['hidden_dim']-opt['pos_enc_hidden_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.Q2 = nn.Linear(opt['hidden_dim'] - opt['pos_enc_hidden_dim'], opt['hidden_dim'] - opt['pos_enc_hidden_dim'])
         self.init_weights(self.Q2)
-        self.V2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.V2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim'] - opt['pos_enc_hidden_dim'])
         self.init_weights(self.V2)
-        self.K2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim']-opt['pos_enc_hidden_dim'])
+        self.K2 = nn.Linear(opt['second_modality_dim'], opt['hidden_dim'] - opt['pos_enc_hidden_dim'])
         self.init_weights(self.K2)
 
         self.Q2p = nn.Linear(opt['pos_enc_hidden_dim'], opt['pos_enc_hidden_dim'])
@@ -174,9 +176,9 @@ class SpGraphTransAttentionLayer(nn.Module):
       kx = self.Kx(x)
       vx = self.Vx(x)
       # perform linear operation and split into h heads
-      kx = kx.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      qx = qx.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      vx = vx.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      kx = kx.view(x.shape[0], -1, self.h, self.d_k)
+      qx = qx.view(x.shape[0], -1, self.h, self.d_k)
+      vx = vx.view(x.shape[0], -1, self.h, self.d_k)
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
       kx = kx.transpose(2, 3)
       qx = qx.transpose(2, 3)
@@ -186,15 +188,15 @@ class SpGraphTransAttentionLayer(nn.Module):
       index2 = torch.arange(qx.shape[2]).unsqueeze(0).unsqueeze(0).unsqueeze(3)
       index3 = torch.arange(qx.shape[3]).unsqueeze(0).unsqueeze(0).unsqueeze(0)
       src_x = qx[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
-      dst_x = kx[index0, edge[:, 0, :].unsqueeze(2).unsqueeze(2), index2, index3]
+      dst_x = kx[index0, edge[:, 1, :].unsqueeze(2).unsqueeze(2), index2, index3]
 
       qp = self.Qp(p)
       kp = self.Kp(p)
       vp = self.Vp(p)
       # perform linear operation and split into h heads
-      kp = kp.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      qp = qp.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      vp = vp.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      kp = kp.view(x.shape[0], -1, self.h, self.d_k)
+      qp = qp.view(x.shape[0], -1, self.h, self.d_k)
+      vp = vp.view(x.shape[0], -1, self.h, self.d_k)
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
       kp = kp.transpose(2, 3)
       qp = qp.transpose(2, 3)
@@ -225,9 +227,9 @@ class SpGraphTransAttentionLayer(nn.Module):
 
       # perform linear operation and split into h heads
 
-      k = k.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      q = q.view(self.opt['batch_size'], -1, self.h, self.d_k)
-      v = v.view(self.opt['batch_size'], -1, self.h, self.d_k)
+      k = k.view(x.shape[0], -1, self.h, self.d_k)
+      q = q.view(x.shape[0], -1, self.h, self.d_k)
+      v = v.view(x.shape[0], -1, self.h, self.d_k)
 
       # transpose to get dimensions [n_nodes, attention_dim, n_heads]
 
@@ -244,7 +246,7 @@ class SpGraphTransAttentionLayer(nn.Module):
     if not self.opt['beltrami'] and self.opt['attention_type'] == "exp_kernel":
       prods = self.output_var ** 2 * torch.exp(-(torch.sum((src - dst_k) ** 2, dim=2) / (2 * self.lengthscale ** 2)))
     elif self.opt['attention_type'] == "scaled_dot":
-      prods = torch.sum(torch.matmul(src.permute(0,3,1,2), dst_k.permute(0,3,2,1) / np.sqrt(self.d_k)), dim=3).permute(0,2,1)
+      prods = torch.sum(torch.matmul(src.permute(0, 3, 1, 2), dst_k.permute(0, 3, 2, 1) / np.sqrt(self.d_k)), dim=3).permute(0, 2, 1)
     elif self.opt['attention_type'] == "cosine_sim":
       cos = torch.nn.CosineSimilarity(dim=2, eps=1e-5)
       prods = cos(src, dst_k)
@@ -268,13 +270,13 @@ class SpGraphTransAttentionLayer(nn.Module):
     return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
 
 
-if __name__ == '__main__':
-  device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  opt = {'dataset': 'Cora', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'heads': 2, 'K': 10,
-         'attention_norm_idx': 0, 'add_source': False,
-         'alpha_dim': 'sc', 'beta_dim': 'sc', 'max_nfe': 1000, 'mix_features': False
-         }
-  dataset = get_dataset(opt, '../data', False)
-  t = 1
-  func = ODEFuncTransformerAtt(dataset.data.num_features, 6, opt, device)
-  out = func(t, dataset.data.x)
+# if __name__ == '__main__':
+#   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#   opt = {'dataset': 'Cora', 'self_loop_weight': 1, 'leaky_relu_slope': 0.2, 'heads': 2, 'K': 10,
+#          'attention_norm_idx': 0, 'add_source': False,
+#          'alpha_dim': 'sc', 'beta_dim': 'sc', 'max_nfe': 1000, 'mix_features': False
+#          }
+#   dataset = get_dataset(opt, '../data', False)
+#   t = 1
+#   func = ODEFuncTransformerAtt(dataset.data.num_features, 6, opt, device)
+#   out = func(t, dataset.data.x)

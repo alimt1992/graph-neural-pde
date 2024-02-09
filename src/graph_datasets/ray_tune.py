@@ -4,14 +4,14 @@ from functools import partial
 
 import numpy as np
 import torch
-from data_multi import get_dataset
+from data import get_dataset, set_train_val_test_split
 from GNN_early import GNNEarly
-from GNN_multi import GNN_multimodal
+from GNN import GNN
 from ray import tune
 from ray.tune import CLIReporter
 from ray.tune.schedulers import ASHAScheduler
 from ray.tune.suggest.ax import AxSearch
-from run_multi import get_optimizer, test, train
+from run_GNN import get_optimizer, test, test_OGB, train
 from torch import nn
 from CGNN import CGNN, get_sym_adj
 from CGNN import train as train_cgnn
@@ -23,91 +23,53 @@ python3 ray_tune.py --dataset ogbn-arxiv --lr 0.005 --add_source --function tran
 
 
 def average_test(models, datas):
-    results = [test(model, data) for model, data in zip(models, datas)]
-    val_accs = []
-
-    for val_acc in results:
-        val_accs.append(val_acc)
-
-    return val_accs
-
-
-def train_ray_rand(opt, checkpoint_dir=None, data_dir=".."):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset, val_dataset = get_dataset(opt, data_dir, device)
-
-
-    # for split in range(opt["num_splits"]):
-    # dataset.data = set_train_val_test_split(
-    #     np.random.randint(0, 1000), dataset.data, num_development=5000 if opt["dataset"] == "CoauthorCS" else 1500)
-    # datas.append(dataset.data)
-
-    if opt['baseline']:
-        opt['num_feature'] = train_dataset.num_node_features
-        opt['num_class'] = train_dataset.num_classes
-        adj = get_sym_adj(dataset.data, opt, device)
-        model = CGNN(opt, adj, opt['time'], device).to(device)
-        train_this = train_cgnn
+    if opt['dataset'] == 'ogbn-arxiv':
+        results = [test_OGB(model, data, opt) for model, data in zip(models, datas)]
     else:
-        opt['num_feature'] = train_dataset.num_node_features
-        opt['num_class'] = train_dataset.num_classes
-        model = GNN_multimodal(opt, opt['num_class'], opt['num_feature'], device)
-        train_this = train
-    
+        results = [test(model, data) for model, data in zip(models, datas)]
+    train_accs, val_accs, tmp_test_accs = [], [], []
 
-    if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
-        
-    model = model.to(device)
-    parameters = [p for p in model.parameters() if p.requires_grad]
+    for train_acc, val_acc, test_acc in results:
+        train_accs.append(train_acc)
+        val_accs.append(val_acc)
+        tmp_test_accs.append(test_acc)
 
-    optimizer = get_optimizer(opt["optimizer"], parameters, lr=opt["lr"], weight_decay=opt["decay"])
-
-    # The `checkpoint_dir` parameter gets passed by Ray Tune when a checkpoint
-    # should be restored.
-    if checkpoint_dir:
-        checkpoint = os.path.join(checkpoint_dir, "checkpoint")
-        model_state, optimizer_state = torch.load(checkpoint)
-        model.load_state_dict(model_state)
-        optimizer.load_state_dict(optimizer_state)
-
-    for epoch in range(1, opt["epoch"]):
-        train_accs, loss = train_this(model, optimizer, train_dataset)
-        val_accs = average_test(model, val_dataset)
-        with tune.checkpoint_dir(step=epoch) as checkpoint_dir:
-            path = os.path.join(checkpoint_dir, "checkpoint")
-            torch.save((model.state_dict(), optimizer.state_dict()), path)
-        tune.report(loss=loss, accuracy=np.mean(val_accs),
-                    forward_nfe=model.fm.sum,
-                    backward_nfe=model.bm.sum)
+    return train_accs, val_accs, tmp_test_accs
 
 
-def train_ray(opt, checkpoint_dir=None, data_dir=".."):
+def train_ray_rand(opt, checkpoint_dir=None, data_dir="../data"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset, val_dataset = get_dataset(opt, data_dir, device)
+    dataset = get_dataset(opt, data_dir, opt['not_lcc'])
 
+    models = []
+    datas = []
+    optimizers = []
 
-    for split in range(opt["num_init"]):
+    for split in range(opt["num_splits"]):
+        dataset.data = set_train_val_test_split(
+            np.random.randint(0, 1000), dataset.data, num_development=5000 if opt["dataset"] == "CoauthorCS" else 1500)
+        datas.append(dataset.data)
+
         if opt['baseline']:
-            opt['num_feature'] = train_dataset.num_node_features
-            opt['num_class'] = train_dataset.num_classes
+            opt['num_feature'] = dataset.num_node_features
+            opt['num_class'] = dataset.num_classes
             adj = get_sym_adj(dataset.data, opt, device)
-            model = CGNN(opt, adj, opt['time'], device).to(device)
+            model, data = CGNN(opt, adj, opt['time'], device).to(device), dataset.data.to(device)
             train_this = train_cgnn
         else:
-            opt['num_feature'] = train_dataset.num_node_features
-            opt['num_class'] = train_dataset.num_classes
-            model = GNN_multimodal(opt, opt['num_class'], opt['num_feature'], device)
+            model = GNN(opt, dataset, device)
             train_this = train
-        
+
+        models.append(model)
 
         if torch.cuda.device_count() > 1:
             model = nn.DataParallel(model)
 
-        model = model.to(device)
+        model, data = model.to(device), dataset.data.to(device)
         parameters = [p for p in model.parameters() if p.requires_grad]
 
         optimizer = get_optimizer(opt["optimizer"], parameters, lr=opt["lr"], weight_decay=opt["decay"])
+        optimizers.append(optimizer)
 
         # The `checkpoint_dir` parameter gets passed by Ray Tune when a checkpoint
         # should be restored.
@@ -118,32 +80,87 @@ def train_ray(opt, checkpoint_dir=None, data_dir=".."):
             optimizer.load_state_dict(optimizer_state)
 
     for epoch in range(1, opt["epoch"]):
-        train_accs, loss = train_this(model, optimizer, train_dataset)
-        val_accs = average_test(model, val_dataset)
+        loss = np.mean(
+            [train_this(model, optimizer, data) for model, optimizer, data in zip(models, optimizers, datas)])
+        train_accs, val_accs, tmp_test_accs = average_test(models, datas)
         with tune.checkpoint_dir(step=epoch) as checkpoint_dir:
+            best = np.argmax(val_accs)
             path = os.path.join(checkpoint_dir, "checkpoint")
-            torch.save((model.state_dict(), optimizer.state_dict()), path)
-        tune.report(loss=loss, accuracy=np.mean(val_accs),
+            torch.save((models[best].state_dict(), optimizers[best].state_dict()), path)
+        tune.report(loss=loss, accuracy=np.mean(val_accs), test_acc=np.mean(tmp_test_accs),
+                    train_acc=np.mean(train_accs),
                     forward_nfe=model.fm.sum,
                     backward_nfe=model.bm.sum)
 
 
-def train_ray_int(opt, checkpoint_dir=None, data_dir=".."):
+def train_ray(opt, checkpoint_dir=None, data_dir="../data"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_dataset, val_dataset = get_dataset(opt, data_dir, device)
+    dataset = get_dataset(opt, data_dir, opt['not_lcc'])
 
-    # if opt["num_splits"] > 0:
-    #     dataset.data = set_train_val_test_split(
-    #         23 * np.random.randint(0, opt["num_splits"]),
-    #         # random prime 23 to make the splits 'more' random. Could remove
-    #         dataset.data,
-    #         num_development=5000 if opt["dataset"] == "CoauthorCS" else 1500)
+    models = []
+    optimizers = []
 
-    model = GNN_multimodal(opt, opt['num_class'], opt['num_feature'], device)# if opt["no_early"]\
-        # else GNNEarly(opt, opt['num_class'], opt['num_feature'], device)
+    data = dataset.data.to(device)
+    datas = [data for i in range(opt["num_init"])]
+
+    for split in range(opt["num_init"]):
+        if opt['baseline']:
+            opt['num_feature'] = dataset.num_node_features
+            opt['num_class'] = dataset.num_classes
+            adj = get_sym_adj(dataset.data, opt, device)
+            model, data = CGNN(opt, adj, opt['time'], device).to(device), dataset.data.to(device)
+            train_this = train_cgnn
+        else:
+            model = GNN(opt, dataset, device)
+            train_this = train
+
+        models.append(model)
+
+        if torch.cuda.device_count() > 1:
+            model = nn.DataParallel(model)
+
+        model = model.to(device)
+        parameters = [p for p in model.parameters() if p.requires_grad]
+
+        optimizer = get_optimizer(opt["optimizer"], parameters, lr=opt["lr"], weight_decay=opt["decay"])
+        optimizers.append(optimizer)
+
+        # The `checkpoint_dir` parameter gets passed by Ray Tune when a checkpoint
+        # should be restored.
+        if checkpoint_dir:
+            checkpoint = os.path.join(checkpoint_dir, "checkpoint")
+            model_state, optimizer_state = torch.load(checkpoint)
+            model.load_state_dict(model_state)
+            optimizer.load_state_dict(optimizer_state)
+
+    for epoch in range(1, opt["epoch"]):
+        loss = np.mean([train_this(model, optimizer, data) for model, optimizer in zip(models, optimizers)])
+        train_accs, val_accs, tmp_test_accs = average_test(models, datas)
+        with tune.checkpoint_dir(step=epoch) as checkpoint_dir:
+            best = np.argmax(val_accs)
+            path = os.path.join(checkpoint_dir, "checkpoint")
+            torch.save((models[best].state_dict(), optimizers[best].state_dict()), path)
+        tune.report(loss=loss, accuracy=np.mean(val_accs), test_acc=np.mean(tmp_test_accs),
+                    train_acc=np.mean(train_accs),
+                    forward_nfe=model.fm.sum,
+                    backward_nfe=model.bm.sum)
+
+
+def train_ray_int(opt, checkpoint_dir=None, data_dir="../data"):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dataset = get_dataset(opt, data_dir, opt['not_lcc'])
+
+    if opt["num_splits"] > 0:
+        dataset.data = set_train_val_test_split(
+            23 * np.random.randint(0, opt["num_splits"]),
+            # random prime 23 to make the splits 'more' random. Could remove
+            dataset.data,
+            num_development=5000 if opt["dataset"] == "CoauthorCS" else 1500)
+
+    model = GNN(opt, dataset, device) if opt["no_early"] else GNNEarly(opt, dataset, device)
     if torch.cuda.device_count() > 1:
         model = nn.DataParallel(model)
-    model = model.to(device)
+    model, data = model.to(device), dataset.data.to(device)
     parameters = [p for p in model.parameters() if p.requires_grad]
     optimizer = get_optimizer(opt["optimizer"], parameters, lr=opt["lr"], weight_decay=opt["decay"])
 
@@ -153,36 +170,35 @@ def train_ray_int(opt, checkpoint_dir=None, data_dir=".."):
         model.load_state_dict(model_state)
         optimizer.load_state_dict(optimizer_state)
 
-    this_test = test
-    best_time = best_epoch = train_acc = val_acc = 0
+    this_test = test_OGB if opt['dataset'] == 'ogbn-arxiv' else test
+    best_time = best_epoch = train_acc = val_acc = test_acc = 0
     for epoch in range(1, opt["epoch"]):
-        tmp_train_acc, loss = train(model, optimizer, train_dataset)
+        loss = train(model, optimizer, data)
         # need next line as it sets the attributes in the solver
 
         if opt["no_early"]:
-            tmp_val_acc = this_test(model, val_dataset, opt)
+            tmp_train_acc, tmp_val_acc, tmp_test_acc = this_test(model, data, opt)
             best_time = opt['time']
         else:
-            tmp_val_acc = this_test(model, val_dataset, opt)
+            tmp_train_acc, tmp_val_acc, tmp_test_acc = this_test(model, data, opt)
         if tmp_val_acc > val_acc:
             best_epoch = epoch
             train_acc = tmp_train_acc
             val_acc = tmp_val_acc
+            test_acc = tmp_test_acc
         if model.odeblock.test_integrator.solver.best_val > val_acc:
             best_epoch = epoch
             val_acc = model.odeblock.test_integrator.solver.best_val
+            test_acc = model.odeblock.test_integrator.solver.best_test
             train_acc = model.odeblock.test_integrator.solver.best_train
             best_time = model.odeblock.test_integrator.solver.best_time
         with tune.checkpoint_dir(step=epoch) as checkpoint_dir:
             path = os.path.join(checkpoint_dir, "checkpoint")
             torch.save((model.state_dict(), optimizer.state_dict()), path)
-        tune.report(loss=loss, accuracy=val_acc, best_time=best_time,
+        tune.report(loss=loss, accuracy=val_acc, test_acc=test_acc, train_acc=train_acc, best_time=best_time,
                     best_epoch=best_epoch,
                     forward_nfe=model.fm.sum, backward_nfe=model.bm.sum)
 
-
-def set_clevrv1_search_space(opt):
-    pass
 
 def set_cora_search_space(opt):
     opt["decay"] = tune.loguniform(0.001, 0.1)  # weight decay l2 reg
@@ -228,6 +244,39 @@ def set_cora_search_space(opt):
     return opt
 
 
+def set_pubmed_search_space(opt):
+    opt["decay"] = tune.uniform(0.001, 0.1)
+    if opt['regularise']:
+        opt["kinetic_energy"] = tune.loguniform(0.01, 1.0)
+        opt["directional_penalty"] = tune.loguniform(0.01, 1.0)
+
+    opt["hidden_dim"] = 128  # tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))
+    opt["lr"] = tune.loguniform(0.02, 0.1)
+    opt["input_dropout"] = 0.4  # tune.uniform(0.2, 0.5)
+    opt["dropout"] = tune.uniform(0, 0.5)
+    opt["time"] = tune.uniform(5.0, 20.0)
+    opt["optimizer"] = tune.choice(["rmsprop", "adam", "adamax"])
+
+    if opt["block"] in {'attention', 'mixed'} or opt['function'] in {'GAT', 'transformer', 'dorsey'}:
+        opt["heads"] = tune.sample_from(lambda _: 2 ** np.random.randint(0, 4))
+        opt["attention_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))
+        opt['attention_norm_idx'] = tune.choice([0, 1])
+        opt["leaky_relu_slope"] = tune.uniform(0, 0.8)
+        opt["self_loop_weight"] = tune.choice([0, 0.5, 1, 2]) if opt['block'] == 'mixed' else tune.choice(
+            [0, 1])  # whether or not to use self-loops
+    else:
+        opt["self_loop_weight"] = tune.uniform(0, 3)
+
+    opt["tol_scale"] = tune.loguniform(1, 1e4)
+
+    if opt["adjoint"]:
+        opt["tol_scale_adjoint"] = tune.loguniform(1, 1e4)
+        opt["adjoint_method"] = tune.choice(["dopri5", "adaptive_heun"])
+    else:
+        raise Exception("Can't train on PubMed without the adjoint method.")
+
+    return opt
+
 
 def set_citeseer_search_space(opt):
     opt["decay"] = 0.1  # tune.loguniform(2e-3, 1e-2)
@@ -267,6 +316,139 @@ def set_citeseer_search_space(opt):
         # opt['gdc_threshold'] = tune.loguniform(0.0001, 0.01)
         opt['ppr_alpha'] = tune.uniform(0.01, 0.2)
         opt['heat_time'] = tune.uniform(1, 5)
+    return opt
+
+
+def set_computers_search_space(opt):
+    opt["decay"] = tune.loguniform(2e-3, 1e-2)
+    if opt['regularise']:
+        opt["kinetic_energy"] = tune.loguniform(0.01, 10.0)
+        opt["directional_penalty"] = tune.loguniform(0.001, 10.0)
+
+    opt["hidden_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))
+    opt["lr"] = tune.loguniform(5e-5, 5e-3)
+    opt["input_dropout"] = tune.uniform(0.4, 0.8)
+    opt["dropout"] = tune.uniform(0, 0.8)
+    opt["self_loop_weight"] = tune.choice([0, 1])
+    opt["time"] = tune.uniform(0.5, 10.0)
+    opt["optimizer"] = tune.choice(["adam", "adamax", "rmsprop"])
+
+    if opt["block"] in {'attention', 'mixed'} or opt['function'] in {'GAT', 'transformer', 'dorsey'}:
+        opt["heads"] = tune.sample_from(lambda _: 2 ** np.random.randint(0, 4))
+        opt["attention_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(3, 8))
+        opt['attention_norm_idx'] = 1  # tune.choice([0, 1])
+        opt["leaky_relu_slope"] = tune.uniform(0, 0.8)
+        opt["self_loop_weight"] = tune.choice([0, 0.5, 1, 2]) if opt['block'] == 'mixed' else tune.choice(
+            [0, 1])  # whether or not to use self-loops
+    else:
+        opt["self_loop_weight"] = tune.uniform(0, 3)
+
+    opt["tol_scale"] = tune.loguniform(1e1, 1e4)
+
+    if opt["adjoint"]:
+        opt["tol_scale_adjoint"] = tune.loguniform(1, 1e5)
+        opt["adjoint_method"] = tune.choice(["dopri5", "adaptive_heun", "rk4"])
+
+    if opt['rewiring'] == 'gdc':
+        # opt['gdc_sparsification'] = tune.choice(['topk', 'threshold'])
+        opt['gdc_sparsification'] = 'threshold'
+        opt['exact'] = False
+        # opt['gdc_method'] = tune.choice(['ppr', 'heat'])
+        opt['gdc_method'] = 'ppr'
+        # opt['avg_degree'] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))  #  bug currently in pyg
+        opt['gdc_threshold'] = tune.loguniform(0.00001, 0.01)
+        # opt['gdc_threshold'] = None
+        opt['ppr_alpha'] = tune.uniform(0.01, 0.2)
+        # opt['heat_time'] = tune.uniform(1, 5)
+    return opt
+
+
+def set_coauthors_search_space(opt):
+    opt["decay"] = tune.loguniform(1e-3, 2e-2)
+    if opt['regularise']:
+        opt["kinetic_energy"] = tune.loguniform(0.01, 10.0)
+        opt["directional_penalty"] = tune.loguniform(0.01, 10.0)
+
+    opt["hidden_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 6))
+    opt["lr"] = tune.loguniform(1e-5, 0.1)
+    opt["input_dropout"] = tune.uniform(0.4, 0.8)
+    opt["dropout"] = tune.uniform(0, 0.8)
+    opt["self_loop_weight"] = tune.choice([0, 1])
+    opt["time"] = tune.uniform(0.5, 10.0)
+    opt["optimizer"] = tune.choice(["adam", "adamax", "rmsprop"])
+
+    if opt["block"] in {'attention', 'mixed'} or opt['function'] in {'GAT', 'transformer', 'dorsey'}:
+        opt["heads"] = tune.sample_from(lambda _: 2 ** np.random.randint(0, 4))
+        opt["attention_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(3, 8))
+        opt['attention_norm_idx'] = tune.choice([0, 1])
+        opt["leaky_relu_slope"] = tune.uniform(0, 0.8)
+        opt["self_loop_weight"] = tune.choice([0, 0.5, 1, 2]) if opt['block'] == 'mixed' else tune.choice(
+            [0, 1])  # whether or not to use self-loops
+    else:
+        opt["self_loop_weight"] = tune.uniform(0, 3)
+
+    opt["tol_scale"] = tune.loguniform(1e1, 1e4)
+
+    if opt["adjoint"]:
+        opt["tol_scale_adjoint"] = tune.loguniform(1, 1e5)
+        opt["adjoint_method"] = tune.choice(["dopri5", "adaptive_heun", "rk4"])
+
+    if opt['rewiring'] == 'gdc':
+        # opt['gdc_sparsification'] = tune.choice(['topk', 'threshold'])
+        opt['gdc_sparsification'] = 'threshold'
+        opt['exact'] = False
+        # opt['gdc_method'] = tune.choice(['ppr', 'heat'])
+        opt['gdc_method'] = 'ppr'
+        # opt['avg_degree'] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))  #  bug currently in pyg
+        opt['gdc_threshold'] = tune.loguniform(0.0001, 0.0005)
+        # opt['gdc_threshold'] = None
+        opt['ppr_alpha'] = tune.uniform(0.1, 0.25)
+        # opt['heat_time'] = tune.uniform(1, 5)
+
+    return opt
+
+
+def set_photo_search_space(opt):
+    opt["decay"] = tune.loguniform(0.001, 1e-2)
+    if opt['regularise']:
+        opt["kinetic_energy"] = tune.loguniform(0.01, 5.0)
+        opt["directional_penalty"] = tune.loguniform(0.001, 10.0)
+
+    opt["hidden_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(3, 7))
+    opt["lr"] = tune.loguniform(1e-3, 0.1)
+    opt["input_dropout"] = tune.uniform(0.4, 0.8)
+    opt["dropout"] = tune.uniform(0, 0.8)
+    opt["time"] = tune.uniform(0.5, 7.0)
+    opt["optimizer"] = tune.choice(["adam", "adamax", "rmsprop"])
+
+    if opt["block"] in {'attention', 'mixed'} or opt['function'] in {'GAT', 'transformer', 'dorsey'}:
+        opt["heads"] = tune.sample_from(lambda _: 2 ** np.random.randint(0, 3))
+        opt["attention_dim"] = tune.sample_from(lambda _: 2 ** np.random.randint(3, 6))
+        opt['attention_norm_idx'] = tune.choice([0, 1])
+        opt["self_loop_weight"] = tune.choice([0, 0.5, 1, 2]) if opt['block'] == 'mixed' else tune.choice(
+            [0, 1])
+        opt["leaky_relu_slope"] = tune.uniform(0, 0.8)
+    else:
+        opt["self_loop_weight"] = tune.uniform(0, 3)
+
+    opt["tol_scale"] = tune.loguniform(100, 1e5)
+
+    if opt["adjoint"]:
+        opt["tol_scale_adjoint"] = tune.loguniform(100, 1e5)
+        opt["adjoint_method"] = tune.choice(["dopri5", "adaptive_heun"])
+
+    if opt['rewiring'] == 'gdc':
+        # opt['gdc_sparsification'] = tune.choice(['topk', 'threshold'])
+        opt['gdc_sparsification'] = 'threshold'
+        opt['exact'] = False
+        # opt['gdc_method'] = tune.choice(['ppr', 'heat'])
+        opt['gdc_method'] = 'ppr'
+        # opt['avg_degree'] = tune.sample_from(lambda _: 2 ** np.random.randint(4, 8))  #  bug currently in pyg
+        opt['gdc_threshold'] = tune.loguniform(0.0001, 0.0005)
+        # opt['gdc_threshold'] = None
+        opt['ppr_alpha'] = tune.uniform(0.1, 0.25)
+        # opt['heat_time'] = tune.uniform(1, 5)
+
     return opt
 
 
@@ -346,18 +528,24 @@ def set_arxiv_search_space(opt):
 
 
 def set_search_space(opt):
-    if opt["dataset"] == "CLEVR_v1":
-        return set_clevrv1_search_space(opt)
     if opt["dataset"] == "Cora":
         return set_cora_search_space(opt)
+    elif opt["dataset"] == "Pubmed":
+        return set_pubmed_search_space(opt)
     elif opt["dataset"] == "Citeseer":
         return set_citeseer_search_space(opt)
+    elif opt["dataset"] == "Computers":
+        return set_computers_search_space(opt)
+    elif opt["dataset"] == "Photo":
+        return set_photo_search_space(opt)
+    elif opt["dataset"] == "CoauthorCS":
+        return set_coauthors_search_space(opt)
     elif opt["dataset"] == "ogbn-arxiv":
         return set_arxiv_search_space(opt)
 
 
 def main(opt):
-    data_dir = os.path.abspath("..")
+    data_dir = os.path.abspath("../data")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     opt = set_search_space(opt)
     scheduler = ASHAScheduler(
@@ -368,14 +556,14 @@ def main(opt):
         reduction_factor=opt["reduction_factor"],
     )
     reporter = CLIReporter(
-        metric_columns=["accuracy", "loss", "training_iteration", "forward_nfe",
+        metric_columns=["accuracy", "test_acc", "train_acc", "loss", "training_iteration", "forward_nfe",
                         "backward_nfe"]
     )
     # choose a search algorithm from https://docs.ray.io/en/latest/tune/api_docs/suggestion.html
     search_alg = AxSearch(metric=opt['metric'])
     search_alg = None
 
-    train_fn = train_ray# if opt["num_splits"] == 0 else train_ray_rand
+    train_fn = train_ray if opt["num_splits"] == 0 else train_ray_rand
 
     result = tune.run(
         partial(train_fn, data_dir=data_dir),

@@ -17,34 +17,15 @@ from scipy import sparse
 POS_ENC_PATH = os.path.join("../data", "pos_encodings")
 
 
-def find_or_make_encodings(opt):
+def find_or_make_encodings(opt, data):
   # generate new positional encodings
-  # do encodings already exist on disk?
-  fname = os.path.join(POS_ENC_PATH, f"{opt['dataset']}_{opt['pos_enc_type']}.pkl")
-  print(f"[i] Looking for positional encodings in {fname}...")
-
-  # - if so, just load them
-  if os.path.exists(fname):
-    print("    Found them! Loading cached version")
-    with open(fname, "rb") as f:
-      pos_encoding = pickle.load(f)
-
-  # - otherwise, calculate...
+  print("    Encodings not found! Calculating and caching them")
+  # choose different functions for different positional encodings
+  if opt['pos_enc_type'] == "GDC":
+    pos_encoding = apply_gdc(data, opt, type="pos_encoding")
   else:
-    print("    Encodings not found! Calculating and caching them")
-    # choose different functions for different positional encodings
-    dataset = get_dataset(opt, '../data', False)
-    data = dataset.data
-    if opt['pos_enc_type'] == "GDC":
-      pos_encoding = apply_gdc(data, opt, type="pos_encoding")
-    else:
-      print(f"[x] The positional encoding type you specified ({opt['pos_enc_type']}) does not exist")
-      quit()
-    # - ... and store them on disk
-    if not os.path.exists(POS_ENC_PATH):
-      os.makedirs(POS_ENC_PATH)
-    with open(fname, "wb") as f:
-      pickle.dump(pos_encoding, f)
+    print(f"[x] The positional encoding type you specified ({opt['pos_enc_type']}) does not exist")
+    quit()
 
   return pos_encoding
 

@@ -14,10 +14,9 @@ class GNN_KNN(BaseGNN):
     block = set_block(opt)
     time_tensor = torch.tensor([0, self.T]).to(device)
     self.odeblock = block(self.f, self.regularization_fns, opt, device, t=time_tensor).to(device)
-    # self.data_edge_index = dataset.data.edge_index.to(device)
     # self.fa = get_full_adjacency(self.num_nodes).to(device)
 
-  def forward(self, x, graph_data, pos_encoding):
+  def forward(self, x, graph_data, pos_encoding, x2=None):
     # Encode each node based on its feature.
     if self.opt['use_labels']:
       y = x[:, :, -self.num_classes:]
@@ -56,11 +55,13 @@ class GNN_KNN(BaseGNN):
       x = torch.cat([x, c_aux], dim=-1)
 
     self.odeblock.set_x0(x)
+    self.graph_data.new_graph(graph_data, x.shape[1])
+    graph_data = self.graph_data
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x, graph_data)
+      z, self.reg_states = self.odeblock(x, graph_data, x2)
     else:
-      z = self.odeblock(x, graph_data)
+      z = self.odeblock(x, graph_data, x2)
 
     if self.opt['fa_layer']:
       temp_time = self.opt['time']
@@ -71,12 +72,12 @@ class GNN_KNN(BaseGNN):
       self.opt['method'] = 'rk4' # self.opt['fa_layer_method']#'rk4'
       self.opt['step_size'] = 1 # self.opt['fa_layer_step_size']#1.0
       self.odeblock.set_x0(z)
-      self.odeblock.odefunc.edge_index = add_edges(self, self.opt)
+      graph_data.edge_index = add_edges(self, graph_data, self.opt)
       if self.opt['edge_sampling_rmv'] != 0:
-        edge_sampling(self, z, self.opt)
+        graph_data.edge_index = edge_sampling(self, graph_data, z, self.opt)
 
-      z = self.odeblock(z, graph_data)
-      self.odeblock.odefunc.edge_index = self.data_edge_index
+      z = self.odeblock(z, graph_data, x2)
+      # self.odeblock.odefunc.edge_index = self.data_edge_index
 
       self.opt['time'] = temp_time
       self.opt['method'] = temp_method
@@ -145,15 +146,17 @@ class GNN_KNN(BaseGNN):
 
     return x
 
-  def forward_ODE(self, x, graph_data, pos_encoding):
+  def forward_ODE(self, x, graph_data, pos_encoding, x2=None):
     x = self.forward_encoder(x, pos_encoding)
 
     self.odeblock.set_x0(x)
+    self.graph_data.new_graph(graph_data, x.shape[1])
+    graph_data = self.graph_data
 
     if self.training and self.odeblock.nreg > 0:
-      z, self.reg_states = self.odeblock(x, graph_data)
+      z, self.reg_states = self.odeblock(x, graph_data, x2)
     else:
-      z = self.odeblock(x, graph_data)
+      z = self.odeblock(x, graph_data, x2)
 
     if self.opt['fa_layer']:
       temp_time = self.opt['time']
@@ -164,12 +167,12 @@ class GNN_KNN(BaseGNN):
       self.opt['method'] = 'rk4' # self.opt['fa_layer_method']#'rk4'
       self.opt['step_size'] = 1 # self.opt['fa_layer_step_size']#1.0
       self.odeblock.set_x0(z)
-      self.odeblock.odefunc.edge_index = add_edges(self, self.opt)
+      graph_data.edge_index = add_edges(self, graph_data, self.opt)
       if self.opt['edge_sampling_rmv'] != 0:
-        edge_sampling(self, z, self.opt)
+        graph_data.edge_index = edge_sampling(self, graph_data, z, self.opt)
 
-      z = self.odeblock(z)
-      self.odeblock.odefunc.edge_index = self.data_edge_index
+      z = self.odeblock(z, graph_data, x2)
+      # self.odeblock.odefunc.edge_index = self.data_edge_index
 
       self.opt['time'] = temp_time
       self.opt['method'] = temp_method

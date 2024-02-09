@@ -1,20 +1,17 @@
 import argparse
+import time
+import openpyxl
+import pandas as pd
+import numpy as np
 import torch
 import torchvision
-import numpy as np
-from torch_geometric.nn import GCNConv, ChebConv
-from GNN_image import GNN_image
-import time
-from torch_geometric.data import DataLoader
-from data_image import edge_index_calc, create_in_memory_dataset
+from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
-from torch_geometric.utils import to_dense_adj
-import pandas as pd
-import torchvision.transforms as transforms
-from data_image import load_data
-import openpyxl
-from utils import get_rw_adj
+from GNN_multi import GNN_multimodal
+from utils import to_dense_adj, get_rw_adj
+from data_multi import load_data
 
 @torch.no_grad()
 def print_image_T(model, dataset, opt, modelpath, height=2, width=3):
@@ -149,7 +146,7 @@ def main(opt):
   Graph_GNN, Graph_train, Graph_test = load_data(opt)
 
   print("creating GNN model")
-  # model = GNN_image(opt, Graph_GNN, device).to(device)
+  # model = GNN_multimodal(opt, Graph_GNN, device).to(device)
   #todo this is so fucked, load model with GNN to get num_classes==10 and then augment adj with below
   # loader = DataLoader(Graph_train, batch_size=model.opt['batch_size'], shuffle=True)
   loader = DataLoader(Graph_train, batch_size=opt['batch_size'], shuffle=True)
@@ -160,7 +157,7 @@ def main(opt):
       # model.odeblock.odefunc.adj = get_rw_adj(model.data.edge_index) #to reset adj matrix
       break
 
-  model = GNN_image(opt, batch, opt['num_class'], device).to(device)
+  model = GNN_multimodal(opt, batch, opt['num_class'], device).to(device)
   # model.load_state_dict(torch.load(modelpath))
   # out = model(batch.x)
   model.eval()

@@ -1,49 +1,46 @@
 import argparse
-
 import torch
-from torch_geometric.nn import GCNConv, ChebConv  # noqa
 from GNN import GNN
 import time
-from data import get_dataset
-from run_GNN import get_optimizer, print_model_params, train, test
+from data_multi import get_dataset
+from run_multi import get_optimizer, print_model_params, train, test
 import networkx as nx
 import matplotlib.pyplot as plt
 
-def construct_graph(model):
-  edges = model.odeblock.odefunc.edge_index
+def construct_graph(edge_index):
+  edges = edge_index
   edge_list = zip(edges[0], edges[1])
   g = nx.Graph(edge_list)
   nx.draw(g)
 
 def main(opt):
-
-  dataset = get_dataset(opt, '../data', False)
+  
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model, data = GNN(opt, dataset, device).to(device), dataset.data.to(device)
+  train_dataset, val_dataset = get_dataset(opt, '..', device)
+  model = GNN(opt, opt['num_class'], opt['num_features'], device).to(device)
   print(opt)
   # todo for some reason the submodule parameters inside the attention module don't show up when running on GPU.
   parameters = [p for p in model.parameters() if p.requires_grad]
   print_model_params(model)
   optimizer = get_optimizer(opt['optimizer'], parameters, lr=opt['lr'], weight_decay=opt['decay'])
-  best_val_acc = test_acc = best_epoch = 0
+  best_val_acc = best_epoch = 0
   for epoch in range(1, opt['epoch']):
     start_time = time.time()
 
-    loss = train(model, optimizer, data)
-    train_acc, val_acc, tmp_test_acc = test(model, data)
+    train_acc, loss = train(model, optimizer, train_dataset)
+    val_acc = test(model, val_dataset)
 
     if val_acc > best_val_acc:
       best_val_acc = val_acc
-      test_acc = tmp_test_acc
       best_epoch = epoch
-    log = 'Epoch: {:03d}, Runtime {:03f}, Loss {:03f}, forward nfe {:d}, backward nfe {:d}, Train: {:.4f}, Val: {:.4f}, Test: {:.4f}'
+    log = 'Epoch: {:03d}, Runtime {:03f}, Loss {:03f}, forward nfe {:d}, backward nfe {:d}, Train: {:.4f}, Val: {:.4f}'
     print(
-      log.format(epoch, time.time() - start_time, loss, model.fm.sum, model.bm.sum, train_acc, best_val_acc, test_acc))
-  print('best val accuracy {:03f} with test accuracy {:03f} at epoch {:d}'.format(best_val_acc, test_acc, best_epoch))
+      log.format(epoch, time.time() - start_time, loss, model.fm.sum, model.bm.sum, train_acc, best_val_acc))
+  print('best val accuracy {:03f} at epoch {:d}'.format(best_val_acc, best_epoch))
 
-  construct_graph(model)
+  # construct_graph(model)
 
-  return train_acc, best_val_acc, test_acc
+  return train_acc, best_val_acc
 
 
 if __name__ == '__main__':

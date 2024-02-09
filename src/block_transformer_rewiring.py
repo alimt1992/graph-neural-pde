@@ -3,8 +3,6 @@ from function_transformer_attention import SpGraphTransAttentionLayer
 from base_classes import ODEblock
 from torch_scatter import scatter
 import numpy as np
-import torch_sparse
-from utils import get_rw_adj, add_remaining_self_loops
 
 
 class RewireAttODEblock(ODEblock):
@@ -13,7 +11,6 @@ class RewireAttODEblock(ODEblock):
     assert opt['att_samp_pct'] > 0 and opt['att_samp_pct'] <= 1, "attention sampling threshold must be in (0,1]"
     self.device = device
     self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, device)
-    # self.odefunc.edge_index, self.odefunc.edge_weight = data.edge_index, edge_weight=data.edge_attr
 
     if opt['adjoint']:
       from torchdiffeq import odeint_adjoint as odeint
@@ -26,21 +23,6 @@ class RewireAttODEblock(ODEblock):
     if opt['function'] not in {'GAT', 'transformer'}:
       self.multihead_att_layer = SpGraphTransAttentionLayer(opt['hidden_dim'], opt['hidden_dim'], opt,
                                                           device, edge_weights=self.odefunc.edge_weight).to(device)
-
-  def reset_graph_data(self, data, dtype):
-    self.num_nodes = data.num_nodes
-    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=2,
-                                         fill_value=self.opt['self_loop_weight'],
-                                         num_nodes=data.num_nodes,
-                                         dtype=dtype)
-    if self.opt['self_loop_weight'] > 0:
-      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
-    self.data_edge_index = edge_index.to(self.device)
-    self.odefunc.edge_index = edge_index.to(self.device)  # this will be changed by attention scores
-    self.odefunc.edge_weight = edge_weight.to(self.device)
-    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
-
   
   def get_attention_weights(self, x):
     if self.opt['function'] not in {'GAT', 'transformer'}:
@@ -60,48 +42,47 @@ class RewireAttODEblock(ODEblock):
     n = self.num_nodes
 
     with torch.no_grad():
-      new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
+      batch_size = self.data_edge_index.shape[0]
+      new_edges = np.random.choice(self.num_nodes, size=(batch_size,2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
       index0 = torch.arange(cat.shape[0])[:, None].expand(cat.shape[0], cat.shape[2]).flatten()
-      index1 = cat[:,0].flatten()
-      index2 = cat[:,1].flatten()
+      index1 = cat[:, 0].flatten()
+      index2 = cat[:, 1].flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       edge_mat = torch.sparse_coo_tensor(indices, torch.ones(cat.shape[0], cat.shape(2)), [cat.shape[0], n, n],
                                          requires_grad=True).to(self.device).to_dense()
       nonzero_mask = torch.zeros_like(edge_mat)
       nonzero_mask[edge_mat != 0] = 1
-      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
-      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(cat.shape[0], n*n, 2)
+      nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(cat.shape[0], n * n, 2)
       new_edges = new_edges * nonzero_mask
       sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-      no_repeats = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+      no_repeats = torch.unique_consecutive(sorted, dim=1).transpose(1, 2)
       self.data_edge_index = no_repeats
       self.odefunc.edge_index = self.data_edge_index
 
   def add_khop_edges(self, k=2, rm_self_loops=True):
     n = self.num_nodes
     for i in range(k-1):
-      # new_edges, new_weights = torch_sparse.spspmm(self.odefunc.edge_index, self.odefunc.edge_weight,
-      #                       self.odefunc.edge_index, self.odefunc.edge_weight, n, n, n, coalesced=True)
       index0 = torch.arange(self.odefunc.edge_index.shape[0])[:, None].expand(self.odefunc.edge_index.shape[0], self.odefunc.edge_index.shape[2]).flatten()
-      index1 = self.odefunc.edge_index[:,0].flatten()
-      index2 = self.odefunc.edge_index[:,1].flatten()
+      index1 = self.odefunc.edge_index[:, 0].flatten()
+      index2 = self.odefunc.edge_index[:, 1].flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       weight_mat = torch.sparse_coo_tensor(indices, self.odefunc.edge_weight.flatten(), [self.odefunc.edge_index.shape[0], n, n],
                                                 requires_grad=True).to(self.device).to_dense()
       new_weights = torch.matmul(weight_mat, weight_mat)
       edge_weights = 0.5 * weight_mat + 0.5 * new_weights
-      zero_mask = 1-torch.eye(n)[None,:,:].expand(self.odefunc.edge_index.shape[0], n, n)
+      zero_mask = 1-torch.eye(n)[None, :, :].expand(self.odefunc.edge_index.shape[0], n, n)
       edge_weights = edge_weights * zero_mask
 
       nonzero_mask = torch.zeros_like(edge_weights)
       nonzero_mask[new_weights != 0] = 1
-      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
-      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(self.odefunc.edge_index.shape[0], n*n, 2)
+      nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(self.odefunc.edge_index.shape[0], n * n, 2)
       new_edges = new_edges * nonzero_mask
       sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-      new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+      new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1, 2)
       
       index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
       index1 = new_edges[:, 0, :]
@@ -215,10 +196,9 @@ class RewireAttODEblock(ODEblock):
     self.odefunc.edge_weight = sampled_attention_weights #rewiring structure so need to replace any preproc ew's with new ew's
     self.odefunc.attention_weights = sampled_attention_weights
 
-  def forward(self, x, graph_data):
+  def forward(self, x, graph_data, y=None):
     t = self.t.type_as(x)
-    
-    self.reset_graph_data(graph_data, x.dtype)
+    self.reset_graph_data(graph_data, x.dtype, y)
 
     if self.training:
       with torch.no_grad():
@@ -230,8 +210,8 @@ class RewireAttODEblock(ODEblock):
         pre_count = self.odefunc.edge_index.shape[2]
         self.densify_edges()
         post_count = self.odefunc.edge_index.shape[2]
-        pc_change = post_count /pre_count - 1
-        threshold = torch.quantile(self.odefunc.edge_weight, 1/(pc_change - self.opt['rw_addD']))
+        pc_change = post_count / pre_count - 1
+        threshold = torch.quantile(self.odefunc.edge_weight, 1 / (pc_change - self.opt['rw_addD']))
 
         self.threshold_edges(x, threshold)
 

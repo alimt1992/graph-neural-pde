@@ -21,7 +21,7 @@ class RegularizedODEfunc(nn.Module):
       x.requires_grad_(True)
       t.requires_grad_(True)
       dstate = self.odefunc(t, x)
-      if len(state) > 1:
+      if len(state[0]) > 1:
         dx = dstate
         reg_states = tuple(reg_fn(x, t, dx, self.odefunc) for reg_fn in self.regularization_fns)
         return (dstate,) + reg_states

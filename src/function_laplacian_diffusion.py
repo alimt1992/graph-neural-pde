@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import numpy as np
-import torch_sparse
 
 from base_classes import ODEFunc
 from utils import MaxNFEException
@@ -29,6 +28,7 @@ class LaplacianODEFunc(ODEFunc):
 
     #if there is other modality
     if self.opt['multi_modal']:
+      self.y = None
       self.Q2 = nn.Linear(in_features, in_features)
       self.init_weights(self.Q2)
       self.V2 = nn.Linear(opt['second_modality_dim'], in_features)
@@ -39,8 +39,8 @@ class LaplacianODEFunc(ODEFunc):
   def sparse_multiply(self, x):
     with (torch.device(self.device)):
       index0 = torch.arange(self.edge_index.shape[0])[:, None].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index1 = self.edge_index[:,0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
-      index2 = self.edge_index[:,1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index1 = self.edge_index[:, 0].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
+      index2 = self.edge_index[:, 1].expand(self.edge_index.shape[0], self.edge_index.shape[2]).flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       if self.opt['block'] in ['attention']:  # adj is a multihead attention
         mean_attention = self.attention_weights.mean(dim=2)
@@ -57,10 +57,10 @@ class LaplacianODEFunc(ODEFunc):
         ax = torch.matmul(sparse_att.to_dense(), x)
     return ax
 
-  def forward(self, t, x, y=None):  # the t param is needed by the ODE solver.
+  def forward(self, t, x):  # the t param is needed by the ODE solver.
     if self.opt['multi_modal']:
         dk = self.in_features
-        x = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2(x), self.K2(y).transpose(-2, -1) / np.sqrt(dk))), self.V2(y))
+        x = torch.matmul(torch.nn.softmax(torch.matmul(self.Q2(x), self.K2(self.y).transpose(-2, -1) / np.sqrt(dk))), self.V2(self.y))
     
     if self.nfe > self.opt["max_nfe"]:
       raise MaxNFEException

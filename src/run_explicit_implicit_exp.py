@@ -2,10 +2,10 @@ import argparse
 import pickle
 
 import torch
-from torch_geometric.nn import GCNConv, ChebConv  # noqa
+from torch.utils.data import DataLoader
 from GNN import GNN
 import time
-from data import get_dataset
+from data_multi import get_dataset
 
 
 def get_cora_opt(opt):
@@ -51,6 +51,25 @@ def get_computers_opt(opt):
   opt['ode'] = 'ode'
   return opt
 
+def get_clevr_opt(opt):
+  opt['dataset'] = 'Computers'
+  opt['hidden_dim'] = 16
+  opt['input_dropout'] = 0.5
+  opt['dropout'] = 0
+  opt['optimizer'] = 'adam'
+  opt['lr'] = 0.01
+  opt['decay'] = 5e-4
+  opt['self_loop_weight'] = 0.555
+  opt['alpha'] = 0.918
+  opt['epoch'] = 400
+  opt['time'] = 12.1
+  opt['num_feature'] = 1433
+  opt['num_class'] = 7
+  opt['num_nodes'] = 2708
+  opt['epoch'] = 50
+  opt['attention_dropout'] = 0
+  opt['ode'] = 'ode'
+  return opt
 
 def get_optimizer(name, parameters, lr, weight_decay=0):
   if name == 'sgd':
@@ -67,48 +86,65 @@ def get_optimizer(name, parameters, lr, weight_decay=0):
     raise Exception("Unsupported optimizer: {}".format(name))
 
 
-def train(model, optimizer, data):
+def train(model, optimizer, dataset):
   model.train()
-  optimizer.zero_grad()
-  out = model(data.x)
-  lf = torch.nn.CrossEntropyLoss()
-  loss = lf(out[data.train_mask], data.y[data.train_mask])
+  loader = DataLoader(dataset, batch_size=model.opt['batch_size'], shuffle=True)
+  total_correct = 0
 
-  # TODO: What is this block about???
-  if model.odeblock.nreg > 0:  # add regularisation - slower for small data, but faster and better performance for large data
-    reg_states = tuple(torch.mean(rs) for rs in model.reg_states)
-    regularization_coeffs = model.regularization_coeffs
+  for batch_idx, batch in enumerate(loader):
+    optimizer.zero_grad()
+    start_time = time.time()
 
-    reg_loss = sum(
-      reg_state * coeff for reg_state, coeff in zip(reg_states, regularization_coeffs) if coeff != 0
-    )
-    loss = loss + reg_loss
+    if batch_idx > model.opt['train_size']//model.opt['batch_size']: # only do this for 1st batch/epoch
+      break
 
-  # Update count of forward evaluations from ODE solver
-  # NOTE: fm stands for "forward meter"
-  # TODO: Rename this to be more informative!
-  model.fm.update(model.getNFE())
-  model.resetNFE()
+    out = model(batch['modality_data'], batch['modality_graphs'], batch['additional_data'])
 
-  # Gradient step
-  loss.backward()
-  optimizer.step()
+    lf = torch.nn.CrossEntropyLoss()
+    loss = lf(out, batch['labels'])  #squeeze now needed
 
-  # Update count of backwards evaluations from ODE solver
-  model.bm.update(model.getNFE())
-  model.resetNFE()
+    pred = out.max(1)[1]
+    total_correct += pred.eq(batch['labels']).sum().item()
 
-  return loss.item()
+    
+    if model.odeblock.nreg > 0:  # add regularisation - slower for small data, but faster and better performance for large data
+      reg_states = tuple(torch.mean(rs) for rs in model.reg_states)
+      regularization_coeffs = model.regularization_coeffs
+
+      reg_loss = sum(
+        reg_state * coeff for reg_state, coeff in zip(reg_states, regularization_coeffs) if coeff != 0
+      )
+      loss = loss + reg_loss
+
+    model.fm.update(model.getNFE())
+    model.resetNFE()
+    loss.backward()
+    optimizer.step()
+    model.bm.update(model.getNFE())
+    model.resetNFE()
+    if batch_idx % 10000 == 0:
+      print("Batch Index {}, number of function evals {} in time {}".format(batch_idx, model.fm.sum, time.time() - start_time))
+    
+  accs = total_correct / model.opt['train_size']
+
+  return accs, loss.item()
 
 
 @torch.no_grad()
-def test(model, data):
+def test(model, dataset):
   model.eval()
-  logits, accs = model(data.x), []
-  for _, mask in data('train_mask', 'val_mask', 'test_mask'):
-    pred = logits[mask].max(1)[1]
-    acc = pred.eq(data.y[mask]).sum().item() / mask.sum().item()
-    accs.append(acc)
+  batch_size = model.opt['batch_size']
+  loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+  total_correct = 0
+  
+  for batch_idx, batch in enumerate(loader):
+    if batch_idx > model.opt['val_size']//model.opt['batch_size']: # only do this for 1st batch/epoch
+      break
+    logits= model(batch['modality_data'], batch['modality_graphs'], batch['additional_data'])
+    pred = logits.max(1)[1]
+    total_correct += pred.eq(batch['labels']).sum().item()
+  accs = total_correct / model.opt['val_size']
+  
   return accs
 
 
@@ -122,9 +158,9 @@ def print_model_params(model):
 
 def main(opt, run_count):
   # Load dataset and create model
-  dataset = get_dataset(opt, '../data', False)
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model, data = GNN(opt, dataset, device).to(device), dataset.data.to(device)
+  train_dataset, val_dataset = get_dataset(opt, '..', device)
+  model= GNN(opt, opt['num_class'], opt['num_features'], device).to(device)
   print(opt)
 
   # Todo for some reason the submodule parameters inside the attention module don't show up when running on GPU.
@@ -142,22 +178,20 @@ def main(opt, run_count):
     'val_acc':[],
     'best_epoch':0,
     'best_val_acc':0.,
-    'best_test_acc':0.,
   }
   runtimes = []
   losses = []
   
   optimizer = get_optimizer(opt['optimizer'], parameters, lr=opt['lr'], weight_decay=opt['decay'])
-  best_val_acc = test_acc = train_acc = best_epoch = 0
+  best_val_acc = train_acc = best_epoch = 0
   for epoch in range(1, opt['epoch']):
     start_time = time.time()
 
-    loss = train(model, optimizer, data)
-    train_acc, val_acc, test_acc = test(model, data)
+    train_acc, loss = train(model, optimizer, train_dataset)
+    val_acc = test(model, val_dataset)
 
     if val_acc > best_val_acc:
       best_val_acc = val_acc
-      best_test_acc = test_acc
       best_epoch = epoch
 
     #if epoch % 10 == 0:
@@ -166,22 +200,20 @@ def main(opt, run_count):
     results['forward_nfe'].append(model.fm.sum)
     results['backward_nfe'].append(model.bm.sum)
     results['train_acc'].append(train_acc)
-    results['test_acc'].append(test_acc)
     results['val_acc'].append(val_acc)
     results['best_epoch'] = best_epoch
     results['best_val_acc'] = best_val_acc
-    results['best_test_acc'] = best_test_acc
 
-    log = 'Epoch: {:03d}, Runtime {:03f}, Loss {:03f}, forward nfe {:d}, backward nfe {:d}, Train: {:.4f}, Val: {:.4f}, Test: {:.4f}'
-    print(log.format(epoch, results['time'][-1], results['loss'][-1], results['forward_nfe'][-1], results['backward_nfe'][-1], results['train_acc'][-1], results['val_acc'][-1], results['test_acc'][-1]))
+    log = 'Epoch: {:03d}, Runtime {:03f}, Loss {:03f}, forward nfe {:d}, backward nfe {:d}, Train: {:.4f}, Val: {:.4f}'
+    print(log.format(epoch, results['time'][-1], results['loss'][-1], results['forward_nfe'][-1], results['backward_nfe'][-1], results['train_acc'][-1], results['val_acc'][-1]))
 
-  print('best val accuracy {:03f} with test accuracy {:03f} at epoch {:d}'.format(best_val_acc, best_test_acc, best_epoch))
+  print('best val accuracy {:03f} at epoch {:d}'.format(best_val_acc, best_epoch))
 
   # TODO: Save results
   # cora_epoch_101_adjoint_false_... . pickle
   pickle.dump( results, open( f"../results/{opt['dataset']}_{opt['method']}_stepsize_{opt['dt']}_run_{run_count}.pickle", "wb" ) )
 
-  return train_acc, best_val_acc, test_acc
+  return train_acc, best_val_acc
 
 
 if __name__ == '__main__':

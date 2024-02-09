@@ -5,11 +5,15 @@ import argparse
 import pickle
 
 def hyperbolize(x):
-  n = pdist(x.detach().numpy(), "sqeuclidean")
+  x = x.detach().numpy()
+  n = [pdist(x[i], "sqeuclidean") for i in range(len(x))]
   MACHINE_EPSILON = np.finfo(np.double).eps
-  m = squareform(n)
-  qsqr = np.sum(x ** 2, axis=1)
-  divisor = np.maximum(1 - qsqr[:, np.newaxis], MACHINE_EPSILON) * np.maximum(1 - qsqr[np.newaxis, :], MACHINE_EPSILON)
+  m = [squareform(n[i]) for i in range(len(n))]
+  m = np.stack(m, axis=0)
+  qsqr = np.sum(x ** 2, axis=2)
+  divisor1 = np.maximum(1 - qsqr[:, :, np.newaxis], initial=MACHINE_EPSILON)
+  divisor2 = np.maximum(1 - qsqr[:, np.newaxis, :], initial=MACHINE_EPSILON)
+  divisor = divisor1 * divisor2
   m = np.arccosh(1 + 2 * m / divisor ) #** 2
   return m
 

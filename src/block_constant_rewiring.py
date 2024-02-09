@@ -1,8 +1,5 @@
 from base_classes import ODEblock
 import torch
-from utils import get_rw_adj, gcn_norm_fill_val, add_remaining_self_loops
-import torch_sparse
-from torch_geometric.utils import get_laplacian
 import numpy as np
 
 class ConstantODEblock(ODEblock):
@@ -21,50 +18,30 @@ class ConstantODEblock(ODEblock):
     self.train_integrator = odeint
     self.test_integrator = odeint
     self.set_tol()
-
-  def reset_graph_data(self, data, dtype):
-    self.num_nodes = data.num_nodes
-    if self.opt['data_norm'] == 'rw':
-      edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
-                                           fill_value=self.opt['self_loop_weight'],
-                                           num_nodes=data.num_nodes,
-                                           dtype=dtype)
-    else:
-      edge_index, edge_weight = gcn_norm_fill_val(data.edge_index, edge_weight=data.edge_attr,
-                                                  fill_value=self.opt['self_loop_weight'],
-                                                  num_nodes=data.num_nodes,
-                                                  dtype=dtype)
-    if self.opt['self_loop_weight'] > 0:
-      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
-    self.odefunc.edge_index = edge_index.to(self.device)
-    self.odefunc.edge_weight = edge_weight.to(self.device)
-    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
-
+  
   def add_random_edges(self):
-    #todo check if theres a pygeometric function for this
-
     # M = self.opt["M_nodes"]
-    M = int(self.num_nodes * (1/(1 - (1 - self.opt['att_samp_pct'])) - 1))
+    M = int(self.num_nodes * (1 / (1 - (1 - self.opt['att_samp_pct'])) - 1))
     n = self.num_nodes
 
     with torch.no_grad():
-      new_edges = np.random.choice(self.num_nodes, size=(self.opt['batch_size'],2,M), replace=True, p=None)
+      batch_size = self.data_edge_index.shape[0]
+      new_edges = np.random.choice(self.num_nodes, size=(batch_size,2,M), replace=True, p=None)
       new_edges = torch.tensor(new_edges)
       cat = torch.cat([self.data_edge_index, new_edges],dim=2)
       index0 = torch.arange(cat.shape[0])[:, None].expand(cat.shape[0], cat.shape[2]).flatten()
-      index1 = cat[:,0].flatten()
-      index2 = cat[:,1].flatten()
+      index1 = cat[:, 0].flatten()
+      index2 = cat[:, 1].flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       edge_mat = torch.sparse_coo_tensor(indices, torch.ones(cat.shape[0], cat.shape(2)), [cat.shape[0], n, n],
                                          requires_grad=True).to(self.device).to_dense()
       nonzero_mask = torch.zeros_like(edge_mat)
       nonzero_mask[edge_mat != 0] = 1
-      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
-      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(cat.shape[0], n*n, 2)
+      nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(cat.shape[0], n * n, 2)
       new_edges = new_edges * nonzero_mask
       sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-      no_repeats = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+      no_repeats = torch.unique_consecutive(sorted, dim=1).transpose(1, 2)
       self.data_edge_index = no_repeats
 
   def add_khop_edges(self, k):
@@ -72,8 +49,8 @@ class ConstantODEblock(ODEblock):
     # do k_hop
     for i in range(k):
       index0 = torch.arange(self.odefunc.edge_index.shape[0])[:, None].expand(self.odefunc.edge_index.shape[0], self.odefunc.edge_index.shape[2]).flatten()
-      index1 = self.odefunc.edge_index[:,0].flatten()
-      index2 = self.odefunc.edge_index[:,1].flatten()
+      index1 = self.odefunc.edge_index[:, 0].flatten()
+      index2 = self.odefunc.edge_index[:, 1].flatten()
       indices = torch.stack([index0, index1, index2] , dim=0)
       weight_mat = torch.sparse_coo_tensor(indices, self.odefunc.edge_weight.flatten(), [self.odefunc.edge_index.shape[0], n, n],
                                                 requires_grad=True).to(self.device).to_dense()
@@ -84,11 +61,11 @@ class ConstantODEblock(ODEblock):
       
       nonzero_mask = torch.zeros_like(edge_weights)
       nonzero_mask[new_weights != 0] = 1
-      nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
-      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(self.odefunc.edge_index.shape[0], n*n, 2)
+      nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+      new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(self.odefunc.edge_index.shape[0], n * n, 2)
       new_edges = new_edges * nonzero_mask
       sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-      new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2)
+      new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1, 2)
       
       index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
       index1 = new_edges[:, 0, :]
@@ -104,10 +81,10 @@ class ConstantODEblock(ODEblock):
   # num_nodes = maybe_num_nodes(edge_index, num_nodes)
 
 
-  def forward(self, x, graph_data):
+  def forward(self, x, graph_data, y=None):
     t = self.t.type_as(x)
 
-    self.reset_graph_data(graph_data, x.dtype)
+    self.reset_graph_data(graph_data, x.dtype, y)
 
     if self.training:
       if self.opt['new_edges'] == 'random':

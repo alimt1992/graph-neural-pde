@@ -1,7 +1,6 @@
 import torch
 from function_transformer_attention import SpGraphTransAttentionLayer
 from base_classes import ODEblock
-from utils import get_rw_adj, add_remaining_self_loops
 
 
 class AttODEblock(ODEblock):
@@ -10,7 +9,6 @@ class AttODEblock(ODEblock):
 
     self.device = device
     self.odefunc = odefunc(self.aug_dim * opt['hidden_dim'], self.aug_dim * opt['hidden_dim'], opt, device)
-    # self.odefunc.edge_index, self.odefunc.edge_weight = data.edge_index, edge_weight=data.edge_attr
 
     if opt['adjoint']:
       from torchdiffeq import odeint_adjoint as odeint
@@ -22,27 +20,14 @@ class AttODEblock(ODEblock):
     # parameter trading off between attention and the Laplacian
     self.multihead_att_layer = SpGraphTransAttentionLayer(opt['hidden_dim'], opt['hidden_dim'], opt,
                                                           device, edge_weights=self.odefunc.edge_weight).to(device)
-
-  def reset_graph_data(self, data, dtype):
-    self.num_nodes = data.num_nodes
-    edge_index, edge_weight = get_rw_adj(data.edge_index, edge_weight=data.edge_attr, norm_dim=1,
-                                         fill_value=self.opt['self_loop_weight'],
-                                         num_nodes=data.num_nodes,
-                                         dtype=dtype)
-    if self.opt['self_loop_weight'] > 0:
-      edge_index, edge_weight = add_remaining_self_loops(edge_index, edge_weight,
-                                                         fill_value=self.opt['self_loop_weight'], num_nodes=data.num_nodes)
-    self.odefunc.edge_index = edge_index.to(self.device)
-    self.odefunc.edge_weight = edge_weight.to(self.device)
-    self.reg_odefunc.odefunc.edge_index, self.reg_odefunc.odefunc.edge_weight = self.odefunc.edge_index, self.odefunc.edge_weight
   
   def get_attention_weights(self, x):
     attention, values = self.multihead_att_layer(x, self.odefunc.edge_index)
     return attention
 
-  def forward(self, x, graph_data):
+  def forward(self, x, graph_data, y=None):
     t = self.t.type_as(x)
-    self.reset_graph_data(graph_data, x.dtype)
+    self.reset_graph_data(graph_data, x.dtype, y)
     self.odefunc.attention_weights = self.get_attention_weights(x)
     self.reg_odefunc.odefunc.attention_weights = self.odefunc.attention_weights
     integrator = self.train_integrator if self.training else self.test_integrator

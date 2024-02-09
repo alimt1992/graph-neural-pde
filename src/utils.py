@@ -7,7 +7,6 @@ import scipy
 from scipy.stats import sem
 import numpy as np
 from torch_scatter import scatter_add, scatter_max
-from torch_geometric.utils.num_nodes import maybe_num_nodes
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -18,21 +17,21 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value, num_nodes):
   n = num_nodes
 
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
-  index1 = edge_index[:,0].flatten()
-  index2 = edge_index[:,1].flatten()
+  index1 = edge_index[:, 0].flatten()
+  index2 = edge_index[:, 1].flatten()
   indices = torch.stack([index0, index1, index2] , dim=0)
   weight_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
                                             requires_grad=True).to_dense()
   edge_weights = weight_mat
-  loop_weights = torch.eye(n)[None,:,:].expand(edge_index.shape[0], n, n) * fill_value
-  edge_weights = torch.sum(torch.cat((edge_weights[:,:,:,None], loop_weights[:,:,:,None]), dim=3), dim=3)
+  loop_weights = torch.eye(n)[None, :, :].expand(edge_index.shape[0], n, n) * fill_value
+  edge_weights = edge_weights + loop_weights
   nonzero_mask = torch.zeros_like(edge_weights)
   nonzero_mask[edge_weights != 0] = 1
-  nonzero_mask = nonzero_mask.reshape(-1, n*n).unsqueeze(2)
-  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None,:,:].expand(edge_index.shape[0], n*n, 2)
+  nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(edge_index.shape[0], n * n, 2)
   new_edges = new_edges * nonzero_mask
   sorted, _ = torch.sort(new_edges, dim=1, descending=True)
-  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1,2).long()
+  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1, 2).long()
   
   index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
   index1 = new_edges[:, 0, :]
@@ -43,13 +42,71 @@ def add_remaining_self_loops(edge_index, edge_attr, fill_value, num_nodes):
   return edge_index, edge_attr
 
 def remove_self_loops(edge_index, edge_attr):
-  pass
+  n = maybe_num_nodes(edge_index, None)
+
+  index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
+  index1 = edge_index[:, 0].flatten()
+  index2 = edge_index[:, 1].flatten()
+  indices = torch.stack([index0, index1, index2] , dim=0)
+  weight_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
+                                            requires_grad=True).to_dense()
+  edge_weights = weight_mat
+  loop_mask = 1 - torch.eye(n)[None, :, :].expand(edge_index.shape[0], n, n)
+  edge_weights = edge_weights * loop_mask
+  nonzero_mask = torch.zeros_like(edge_weights)
+  nonzero_mask[edge_weights != 0] = 1
+  nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(edge_index.shape[0], n * n, 2)
+  new_edges = new_edges * nonzero_mask
+  sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1, 2).long()
+  
+  index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
+  index1 = new_edges[:, 0, :]
+  index2 = new_edges[:, 1, :]
+  edge_index = new_edges
+  edge_attr = edge_weights[index0, index1, index2]
+
+  return edge_index, edge_attr
+
+def to_undirected(edge_index):
+  new_edge_index = torch.cat([edge_index, edge_index[:, [1, 0], :]], dim=2).transpose(1, 2)
+  sorted, _ = torch.sort(new_edge_index, dim=1, descending=True)
+  new_edge_index = torch.unique_consecutive(sorted, dim=1).transpose(1, 2).long()
+  return new_edge_index
+
+def dense_to_sparse(adj_mat):
+  n = adj_mat.shape[1]
+  edge_weights = adj_mat
+  nonzero_mask = torch.zeros_like(edge_weights)
+  nonzero_mask[edge_weights != 0] = 1
+  nonzero_mask = nonzero_mask.reshape(-1, n * n).unsqueeze(2)
+  new_edges = torch.cartesian_prod(torch.arange(n), torch.arange(n))[None, :, :].expand(edge_index.shape[0], n * n, 2)
+  new_edges = new_edges * nonzero_mask
+  sorted, _ = torch.sort(new_edges, dim=1, descending=True)
+  new_edges = torch.unique_consecutive(sorted, dim=1).transpose(1, 2).long()
+  
+  index0 = torch.arange(new_edges.shape[0])[:, None].expand(new_edges.shape[0], new_edges.shape[2])
+  index1 = new_edges[:, 0, :]
+  index2 = new_edges[:, 1, :]
+  edge_index = new_edges
+  edge_attr = edge_weights[index0, index1, index2]
+
+  return edge_index, edge_attr
+
+def maybe_num_nodes(edge_index, num_nodes):
+  if num_nodes is not None:
+        return num_nodes
+  return int(edge_index.max()) + 1
 
 def to_dense_adj(edge_index, edge_attr=None):
   n = maybe_num_nodes(edge_index, None)
+  if edge_attr is None:
+    edge_attr = torch.ones((edge_index.size(0), edge_index.size(2),), dtype=torch.float64,
+                             device=edge_index.device)
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
-  index1 = edge_index[:,0].flatten()
-  index2 = edge_index[:,1].flatten()
+  index1 = edge_index[:, 0].flatten()
+  index2 = edge_index[:, 1].flatten()
   indices = torch.stack([index0, index1, index2] , dim=0)
   adj_mat = torch.sparse_coo_tensor(indices, edge_attr.flatten(), [edge_index.shape[0], n, n],
                                             requires_grad=True).to_dense()
@@ -72,7 +129,7 @@ def softmax(src, index, num_nodes=None):
 def squareplus(src, index, num_nodes):
   num_nodes = maybe_num_nodes(index, num_nodes)
   
-  out = src - src.amax(dim=[1,2], keepdim=True)
+  out = src - src.amax(dim=[1, 2], keepdim=True)
   out = (out + torch.sqrt(out ** 2 + 4)) / 2
 
   index0 = torch.arange(src.shape[0]).unsqueeze(1).unsqueeze(2)
@@ -140,8 +197,8 @@ def gcn_norm_fill_val(edge_index, edge_weight=None, fill_value=0., num_nodes=Non
 def coo2tensor(edge_index, edge_weight, device=None):
   n = maybe_num_nodes(edge_index, n)
   index0 = torch.arange(edge_index.shape[0])[:, None].expand(edge_index.shape[0], edge_index.shape[2]).flatten()
-  index1 = edge_index[:,0].flatten()
-  index2 = edge_index[:,1].flatten()
+  index1 = edge_index[:, 0].flatten()
+  index2 = edge_index[:, 1].flatten()
   indices = torch.stack([index0, index1, index2] , dim=0)
   weight_mat = torch.sparse_coo_tensor(indices, edge_weight.flatten(), [edge_index.shape[0], n, n],
                                             requires_grad=True, device=device)
